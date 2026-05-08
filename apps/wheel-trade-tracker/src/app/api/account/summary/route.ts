@@ -1,0 +1,1079 @@
+import { NextResponse } from "next/server";
+import { prisma } from "@/server/prisma";
+import { getServerSession } from "next-auth";
+import { authOptions } from "@/server/auth/auth";
+import { capitalUsedForTrade } from "@/lib/tradeMetrics";
+import { getEffectiveUserId } from "@/server/auth/getEffectiveUserId";
+
+export const revalidate = 0;
+export const dynamic = "force-dynamic";
+
+// -------------------------
+// Helpers
+// -------------------------
+const DAY_MS = 86_400_000;
+const isCSP = (type: string | null | undefined) => {
+  const t = (type ?? "").toLowerCase();
+  return t === "cash secured put" || t === "cashsecuredput" || t === "csp";
+};
+const isCC = (type: string | null | undefined) => {
+  const t = (type ?? "").toLowerCase();
+  return t === "covered call" || t === "coveredcall" || t === "cc";
+};
+const isLongPut = (type: string | null | undefined) => {
+  const t = (type ?? "").toLowerCase();
+  return t === "put";
+};
+const isLongCall = (type: string | null | undefined) => {
+  const t = (type ?? "").toLowerCase();
+  return t === "call";
+};
+
+const collateralFor = (strike?: number | null, contracts?: number | null) =>
+  Number(strike ?? 0) * 100 * Number(contracts ?? 0);
+
+const startOfMonthUTC = () => {
+  const d = new Date();
+  d.setUTCDate(1);
+  d.setUTCHours(0, 0, 0, 0);
+  return d;
+};
+
+const startOfYearUTC = () => {
+  const d = new Date();
+  d.setUTCMonth(0, 1);
+  d.setUTCDate(1);
+  d.setUTCHours(0, 0, 0, 0);
+  return d;
+};
+
+const startOfNDaysAgoUTC = (n: number) => {
+  const d = ensureUtcMidnight(new Date());
+  return new Date(d.getTime() - n * DAY_MS); // inclusive window
+};
+
+// Format helpers (UTC)
+const toIsoDayUTC = (d: Date) => {
+  const dt = ensureUtcMidnight(d);
+  return dt.toISOString().slice(0, 10); // YYYY-MM-DD
+};
+
+const toIsoMonthUTC = (d: Date) =>
+  `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, "0")}`; // YYYY-MM
+
+const toIsoWeekMondayUTC = (d: Date) => {
+  const dt = ensureUtcMidnight(d);
+  const day = dt.getUTCDay();
+  const monday = new Date(dt.getTime() - (day === 0 ? 6 : day - 1) * DAY_MS);
+  return toIsoDayUTC(monday); // YYYY-MM-DD of the Monday
+};
+
+// UTC-safe day math (avoid TZ off-by-one)
+const ensureUtcMidnight = (d: Date | string) => {
+  const dt = new Date(d);
+  return new Date(
+    Date.UTC(dt.getUTCFullYear(), dt.getUTCMonth(), dt.getUTCDate()),
+  );
+};
+
+// Prefer stored premiumCaptured; otherwise estimate from contractPrice vs closingPrice.
+const realizedFor = (row: {
+  type?: string | null;
+  contracts: number;
+  contractPrice: number;
+  closingPrice: number | null;
+  premiumCaptured: number | null;
+}) => {
+  if (row.premiumCaptured != null) return Number(row.premiumCaptured);
+  const openPx = Number(row.contractPrice);
+  const closePx = Number(row.closingPrice ?? 0);
+  const contracts = Number(row.contracts);
+  // Short (CSP/CC): credit_at_open - debit_to_close
+  if (isCSP(row.type) || isCC(row.type)) {
+    return (openPx - closePx) * 100 * contracts;
+  }
+  // Long (Put/Call): credit_from_close - debit_at_open
+  if (isLongPut(row.type) || isLongCall(row.type)) {
+    return (closePx - openPx) * 100 * contracts;
+  }
+  // Fallback: treat like short
+  return (openPx - closePx) * 100 * contracts;
+};
+
+const sumRealized = (
+  rows: Array<{
+    type?: string | null;
+    contracts: number;
+    contractPrice: number;
+    closingPrice: number | null;
+    premiumCaptured: number | null;
+  }>,
+) => rows.reduce((acc, r) => acc + realizedFor(r), 0);
+
+// -------------------------
+// GET /api/account/summary
+// -------------------------
+export async function GET() {
+  // Resolve current user
+  const session = await getServerSession(authOptions);
+  if (!session?.user?.id) {
+    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  }
+  const userId = await getEffectiveUserId(session.user.id, session.user.isAdmin ?? false);
+
+  // 1) Load portfolios scoped to the current user
+  const portfolios = await prisma.portfolio.findMany({
+    where: { userId },
+    select: {
+      id: true,
+      name: true,
+      startingCapital: true,
+      capitalTransactions: { select: { type: true, amount: true } },
+    },
+    orderBy: { createdAt: "asc" },
+  });
+
+  if (portfolios.length === 0) {
+    return NextResponse.json({
+      perPortfolio: {},
+      totals: {
+        portfolioCount: 0,
+        capitalBase: 0,
+        currentCapital: 0,
+        capitalInUse: 0,
+        cashAvailable: 0,
+        percentUsed: 0,
+        realizedMTD: 0,
+        realizedYTD: 0,
+      },
+      nextExpiration: null as {
+        date: string;
+        contracts: number;
+        topTicker?: string;
+      } | null,
+      topTickers: [] as Array<{ ticker: string; collateral: number }>,
+    });
+  }
+
+  const now = new Date();
+  const monthStart = startOfMonthUTC();
+  const yearStart = startOfYearUTC();
+  const ninetyStart = startOfNDaysAgoUTC(89); // 90 days incl today
+
+  // Per-request aggregates (avoid module-scoped mutation across refreshes)
+  const globalExposureMap = new Map<string, number>(); // open CSP collateral by ticker
+  const globalMtdDaily = new Map<string, number>(); // YYYY-MM-DD -> sum of realized
+  const globalYtdMonthly = new Map<string, number>(); // YYYY-MM -> sum of realized
+  const globalDaily90 = new Map<string, number>(); // last 90 days, YYYY-MM-DD -> realized
+  const globalWeekly52 = new Map<string, number>(); // Monday YYYY-MM-DD -> realized (last 52w)
+  const globalMonthlyAll = new Map<string, number>(); // YYYY-MM -> realized (all time)
+  const globalYearly = new Map<string, number>(); // YYYY -> realized (all time)
+
+  // Collector for a true global next-expiration across all portfolios
+  const allOpenForNext: Array<{
+    dateIso: string;
+    ticker: string;
+    contracts: number;
+  }> = [];
+
+  // 2) Per-portfolio snapshots (parallelized)
+  const perPortfolioEntries = await Promise.all(
+    portfolios.map(async (p) => {
+      const [openTrades, closedAll, closedMTD, closedYTD, closed90, openStockLots, closedStockLotsAll] =
+        await Promise.all([
+          prisma.trade.findMany({
+            where: { portfolioId: p.id, status: "open" },
+            select: {
+              id: true,
+              ticker: true,
+              type: true,
+              strikePrice: true,
+              contractsOpen: true,
+              expirationDate: true,
+              createdAt: true,
+              contractPrice: true,
+            },
+          }),
+          prisma.trade.findMany({
+            where: { portfolioId: p.id, status: "closed" },
+            select: {
+              ticker: true,
+              type: true,
+              contracts: true,
+              contractPrice: true,
+              closingPrice: true,
+              premiumCaptured: true,
+              createdAt: true,
+              closedAt: true,
+              closeReason: true,
+            },
+          }),
+          prisma.trade.findMany({
+            where: {
+              portfolioId: p.id,
+              status: "closed",
+              closedAt: { gte: monthStart },
+            },
+            select: {
+              ticker: true,
+              type: true,
+              contracts: true,
+              contractPrice: true,
+              closingPrice: true,
+              premiumCaptured: true,
+              closedAt: true,
+            },
+          }),
+          prisma.trade.findMany({
+            where: {
+              portfolioId: p.id,
+              status: "closed",
+              closedAt: { gte: yearStart },
+            },
+            select: {
+              ticker: true,
+              type: true,
+              contracts: true,
+              contractPrice: true,
+              closingPrice: true,
+              premiumCaptured: true,
+              closedAt: true,
+            },
+          }),
+          prisma.trade.findMany({
+            where: {
+              portfolioId: p.id,
+              status: "closed",
+              closedAt: { gte: ninetyStart },
+            },
+            select: {
+              ticker: true,
+              type: true,
+              contracts: true,
+              contractPrice: true,
+              closingPrice: true,
+              premiumCaptured: true,
+              closedAt: true,
+            },
+          }),
+          prisma.stockLot.findMany({
+            where: { portfolioId: p.id, status: "OPEN" },
+            select: {
+              ticker: true,
+              shares: true,
+              avgCost: true,
+            },
+          }),
+          prisma.stockLot.findMany({
+            where: { portfolioId: p.id, status: "CLOSED" },
+            select: { realizedPnl: true, closedAt: true },
+          }),
+        ]);
+
+      // Capital in use: CSP collateral + long option premium at risk (CC = 0) + open stock lots
+      const cspOpen = openTrades.filter((t) => isCSP(t.type));
+      const capitalInUseOptions = openTrades.reduce((sum, t) => {
+        return (
+          sum +
+          capitalUsedForTrade({
+            type: t.type,
+            strikePrice: t.strikePrice,
+            contractsOpen: t.contractsOpen,
+            contractPrice: t.contractPrice,
+          })
+        );
+      }, 0);
+      const capitalInUseStocks = openStockLots.reduce((sum, lot) => {
+        const shares = Number(lot.shares ?? 0);
+        const avgCost = Number(lot.avgCost ?? 0);
+        return sum + shares * avgCost;
+      }, 0);
+      const capitalInUse = capitalInUseOptions + capitalInUseStocks;
+
+      // Biggest CSP by collateral
+      const biggestRaw = cspOpen
+        .map((t) => ({
+          ticker: t.ticker,
+          strikePrice: Number(t.strikePrice),
+          contracts: Number(t.contractsOpen ?? 0),
+          expirationDate: new Date(t.expirationDate),
+          collateral: collateralFor(t.strikePrice, t.contractsOpen),
+        }))
+        .sort((a, b) => b.collateral - a.collateral)[0];
+
+      const biggest = biggestRaw
+        ? {
+            ticker: biggestRaw.ticker,
+            strikePrice: biggestRaw.strikePrice,
+            contracts: biggestRaw.contracts,
+            collateral: biggestRaw.collateral,
+            expirationDate: biggestRaw.expirationDate.toISOString(),
+          }
+        : null;
+
+      // Capital concentration by ticker — CSP collateral + open stock lot cost basis
+      const exposureByTicker = new Map<string, number>();
+      for (const t of cspOpen) {
+        const cap = collateralFor(t.strikePrice, t.contractsOpen);
+        if (t.ticker) exposureByTicker.set(t.ticker, (exposureByTicker.get(t.ticker) ?? 0) + cap);
+      }
+      for (const lot of openStockLots) {
+        const cap = Number(lot.shares ?? 0) * Number(lot.avgCost ?? 0);
+        if (lot.ticker && cap > 0) exposureByTicker.set(lot.ticker, (exposureByTicker.get(lot.ticker) ?? 0) + cap);
+      }
+      // accumulate to global exposure map
+      for (const [tk, cap] of exposureByTicker.entries()) {
+        globalExposureMap.set(tk, (globalExposureMap.get(tk) ?? 0) + cap);
+      }
+      const totalColl = capitalInUse || 1;
+      const topTickers = Array.from(exposureByTicker.entries())
+        .sort((a, b) => b[1] - a[1])
+        .slice(0, 3)
+        .map(([ticker, cap]) => ({
+          ticker,
+          collateral: cap,
+          pct: (cap / totalColl) * 100,
+        }));
+
+      // Expirations (per-portfolio) + “expiring in 7 days”
+      const expirationsByDay = new Map<number, number>(); // key = UTC midnight millis
+      let expiringSoonCount = 0;
+
+      for (const t of openTrades) {
+        const contracts = Math.trunc(Number(t.contractsOpen ?? 0));
+        if (!Number.isFinite(contracts) || contracts <= 0) continue; // ignore zero/invalid
+
+        const dMid = ensureUtcMidnight(new Date(t.expirationDate));
+        const dayKey = dMid.getTime();
+        const todayKey = ensureUtcMidnight(now).getTime();
+        if (!Number.isFinite(dayKey)) continue; // skip invalid dates
+
+        // Ignore expirations strictly before today
+        if (dayKey < todayKey) continue;
+
+        expirationsByDay.set(
+          dayKey,
+          (expirationsByDay.get(dayKey) ?? 0) + contracts,
+        );
+
+        // Count contracts expiring within 7 days (inclusive), UTC-safe
+        const du = Math.ceil((dayKey - todayKey) / DAY_MS);
+        if (du >= 0 && du <= 7) expiringSoonCount += contracts;
+
+        // collect for global next-expiration
+        allOpenForNext.push({
+          dateIso: new Date(dayKey).toISOString().slice(0, 10),
+          ticker: t.ticker,
+          contracts,
+        });
+      }
+
+      // Per-portfolio next expiration (earliest FUTURE date with >0 contracts)
+      const nextPair = Array.from(expirationsByDay.entries()).sort(
+        (a, b) => a[0] - b[0],
+      )[0];
+
+      const nextExpiration = nextPair
+        ? {
+            date: new Date(nextPair[0]).toISOString().slice(0, 10),
+            contracts: nextPair[1],
+          }
+        : null;
+
+      // Open avg age (days)
+      const openAvgDays =
+        openTrades.length === 0
+          ? null
+          : Number(
+              (
+                openTrades.reduce(
+                  (s, t) =>
+                    s +
+                    Math.max(
+                      0,
+                      (now.getTime() - new Date(t.createdAt).getTime()) /
+                        DAY_MS,
+                    ),
+                  0,
+                ) / openTrades.length
+              ).toFixed(1),
+            );
+
+      // Stock lot realized gains by period (fully closed lots only)
+      const stockLotPnl = (lots: Array<{ realizedPnl: unknown }>) =>
+        lots.reduce((sum, l) => sum + Number(l.realizedPnl ?? 0), 0);
+      const closedStockLotsMTD = closedStockLotsAll.filter(
+        (l) => l.closedAt != null && new Date(l.closedAt) >= monthStart,
+      );
+      const closedStockLotsYTD = closedStockLotsAll.filter(
+        (l) => l.closedAt != null && new Date(l.closedAt) >= yearStart,
+      );
+      const closedStockLots90 = closedStockLotsAll.filter(
+        (l) => l.closedAt != null && new Date(l.closedAt) >= ninetyStart,
+      );
+
+      // Realized P/L buckets (options + stock lots)
+      const totalProfitAll = sumRealized(closedAll) + stockLotPnl(closedStockLotsAll);
+      const realizedMTD = sumRealized(closedMTD) + stockLotPnl(closedStockLotsMTD);
+      const realizedYTD = sumRealized(closedYTD) + stockLotPnl(closedStockLotsYTD);
+
+      // Win rate: trades where realized P&L > 0
+      const winCount = closedAll.filter((t) => realizedFor({
+        type: t.type, contracts: Number(t.contracts),
+        contractPrice: Number(t.contractPrice),
+        closingPrice: t.closingPrice == null ? null : Number(t.closingPrice),
+        premiumCaptured: t.premiumCaptured == null ? null : Number(t.premiumCaptured),
+      }) > 0).length;
+      const winRate = closedAll.length > 0 ? (winCount / closedAll.length) * 100 : null;
+
+      // Avg days in closed trades
+      const closedWithDates = closedAll.filter((t) => t.closedAt && t.createdAt);
+      const avgDaysInTrade = closedWithDates.length > 0
+        ? closedWithDates.reduce((sum, t) => {
+            return sum + Math.max(0, (new Date(t.closedAt!).getTime() - new Date(t.createdAt).getTime()) / DAY_MS);
+          }, 0) / closedWithDates.length
+        : null;
+
+      // Period win stats (no extra DB queries — filter already-fetched closed90/MTD/YTD)
+      const sevenDaysAgo = startOfNDaysAgoUTC(6); // 7-day window inclusive of today
+      const closed7D = closed90.filter(
+        (t) => t.closedAt != null && new Date(t.closedAt) >= sevenDaysAgo,
+      );
+      const closedStockLots7D = closedStockLots90.filter(
+        (l) => l.closedAt != null && new Date(l.closedAt) >= sevenDaysAgo,
+      );
+      const realized7D = sumRealized(closed7D) + stockLotPnl(closedStockLots7D);
+
+      const periodWins = (rows: Array<{ type?: string | null; contracts: number; contractPrice: number; closingPrice: number | null; premiumCaptured: number | null }>) => {
+        const wins = rows.filter((t) =>
+          realizedFor({
+            type: t.type,
+            contracts: Number(t.contracts),
+            contractPrice: Number(t.contractPrice),
+            closingPrice: t.closingPrice == null ? null : Number(t.closingPrice),
+            premiumCaptured: t.premiumCaptured == null ? null : Number(t.premiumCaptured),
+          }) > 0,
+        ).length;
+        return { wins, total: rows.length };
+      };
+
+      const ws7D = periodWins(closed7D);
+      const wsMTD = periodWins(closedMTD);
+      const wsYTD = periodWins(closedYTD);
+
+      // Per-portfolio realized premium by ticker
+      const perPremiumMap = new Map<string, number>();
+      for (const row of closedAll) {
+        const realized = realizedFor({
+          type: row.type,
+          contracts: Number(row.contracts),
+          contractPrice: Number(row.contractPrice),
+          closingPrice:
+            row.closingPrice == null ? null : Number(row.closingPrice),
+          premiumCaptured:
+            row.premiumCaptured == null ? null : Number(row.premiumCaptured),
+        });
+        if (row.ticker)
+          perPremiumMap.set(
+            row.ticker,
+            (perPremiumMap.get(row.ticker) ?? 0) + realized,
+          );
+      }
+      const perPremiumArray = Array.from(perPremiumMap.entries())
+        .map(([ticker, premium]) => ({ ticker, premium }))
+        .sort((a, b) => b.premium - a.premium);
+
+      // Build per-portfolio MTD (daily) & YTD (monthly) progress buckets
+      const mtdDailyBucket = new Map<string, number>(); // YYYY-MM-DD -> sum
+      for (const r of closedMTD) {
+        const key = r.closedAt ? toIsoDayUTC(new Date(r.closedAt)) : null;
+        if (!key) continue;
+        const val = realizedFor({
+          type: r.type,
+          contracts: Number(r.contracts),
+          contractPrice: Number(r.contractPrice),
+          closingPrice: r.closingPrice == null ? null : Number(r.closingPrice),
+          premiumCaptured:
+            r.premiumCaptured == null ? null : Number(r.premiumCaptured),
+        });
+        mtdDailyBucket.set(key, (mtdDailyBucket.get(key) ?? 0) + val);
+      }
+      for (const lot of closedStockLotsMTD) {
+        const key = lot.closedAt ? toIsoDayUTC(new Date(lot.closedAt)) : null;
+        if (!key) continue;
+        mtdDailyBucket.set(key, (mtdDailyBucket.get(key) ?? 0) + Number(lot.realizedPnl ?? 0));
+      }
+
+      const ytdMonthlyBucket = new Map<string, number>(); // YYYY-MM -> sum
+      for (const r of closedYTD) {
+        const d = r.closedAt ? new Date(r.closedAt) : null;
+        if (!d) continue;
+        const key = toIsoMonthUTC(d);
+        const val = realizedFor({
+          type: r.type,
+          contracts: Number(r.contracts),
+          contractPrice: Number(r.contractPrice),
+          closingPrice: r.closingPrice == null ? null : Number(r.closingPrice),
+          premiumCaptured:
+            r.premiumCaptured == null ? null : Number(r.premiumCaptured),
+        });
+        ytdMonthlyBucket.set(key, (ytdMonthlyBucket.get(key) ?? 0) + val);
+      }
+      for (const lot of closedStockLotsYTD) {
+        const d = lot.closedAt ? new Date(lot.closedAt) : null;
+        if (!d) continue;
+        const key = toIsoMonthUTC(d);
+        ytdMonthlyBucket.set(key, (ytdMonthlyBucket.get(key) ?? 0) + Number(lot.realizedPnl ?? 0));
+      }
+
+      // 90-day daily bucket (per-portfolio)
+      const daily90Bucket = new Map<string, number>(); // YYYY-MM-DD -> sum
+      for (const r of closed90) {
+        const key = r.closedAt ? toIsoDayUTC(new Date(r.closedAt)) : null;
+        if (!key) continue;
+        const val = realizedFor({
+          type: r.type,
+          contracts: Number(r.contracts),
+          contractPrice: Number(r.contractPrice),
+          closingPrice: r.closingPrice == null ? null : Number(r.closingPrice),
+          premiumCaptured:
+            r.premiumCaptured == null ? null : Number(r.premiumCaptured),
+        });
+        daily90Bucket.set(key, (daily90Bucket.get(key) ?? 0) + val);
+      }
+      for (const lot of closedStockLots90) {
+        const key = lot.closedAt ? toIsoDayUTC(new Date(lot.closedAt)) : null;
+        if (!key) continue;
+        daily90Bucket.set(key, (daily90Bucket.get(key) ?? 0) + Number(lot.realizedPnl ?? 0));
+      }
+
+      // Accumulate into global 90-day bucket
+      for (const [day, val] of daily90Bucket.entries()) {
+        globalDaily90.set(day, (globalDaily90.get(day) ?? 0) + val);
+      }
+
+      // Accumulate into global series buckets
+      for (const [day, val] of mtdDailyBucket.entries()) {
+        globalMtdDaily.set(day, (globalMtdDaily.get(day) ?? 0) + val);
+      }
+      for (const [mon, val] of ytdMonthlyBucket.entries()) {
+        globalYtdMonthly.set(mon, (globalYtdMonthly.get(mon) ?? 0) + val);
+      }
+
+      // Build weekly-52, monthly-all-time, and yearly buckets from closedAll (no extra DB query)
+      const fiftyTwoWeeksAgo = new Date(ensureUtcMidnight(now).getTime() - 364 * DAY_MS);
+      const weekly52Bucket = new Map<string, number>();
+      const monthlyAllBucket = new Map<string, number>();
+      const yearlyBucket = new Map<string, number>();
+      for (const r of closedAll) {
+        if (!r.closedAt) continue;
+        const d = new Date(r.closedAt);
+        const val = realizedFor({
+          type: r.type,
+          contracts: Number(r.contracts),
+          contractPrice: Number(r.contractPrice),
+          closingPrice: r.closingPrice == null ? null : Number(r.closingPrice),
+          premiumCaptured: r.premiumCaptured == null ? null : Number(r.premiumCaptured),
+        });
+        if (d >= fiftyTwoWeeksAgo) {
+          const wKey = toIsoWeekMondayUTC(d);
+          weekly52Bucket.set(wKey, (weekly52Bucket.get(wKey) ?? 0) + val);
+        }
+        const mKey = toIsoMonthUTC(d);
+        monthlyAllBucket.set(mKey, (monthlyAllBucket.get(mKey) ?? 0) + val);
+        const yKey = String(d.getUTCFullYear());
+        yearlyBucket.set(yKey, (yearlyBucket.get(yKey) ?? 0) + val);
+      }
+      for (const lot of closedStockLotsAll) {
+        if (!lot.closedAt) continue;
+        const d = new Date(lot.closedAt);
+        const pnl = Number(lot.realizedPnl ?? 0);
+        if (d >= fiftyTwoWeeksAgo) {
+          const wKey = toIsoWeekMondayUTC(d);
+          weekly52Bucket.set(wKey, (weekly52Bucket.get(wKey) ?? 0) + pnl);
+        }
+        const mKey = toIsoMonthUTC(d);
+        monthlyAllBucket.set(mKey, (monthlyAllBucket.get(mKey) ?? 0) + pnl);
+        const yKey = String(d.getUTCFullYear());
+        yearlyBucket.set(yKey, (yearlyBucket.get(yKey) ?? 0) + pnl);
+      }
+      for (const [k, v] of weekly52Bucket) globalWeekly52.set(k, (globalWeekly52.get(k) ?? 0) + v);
+      for (const [k, v] of monthlyAllBucket) globalMonthlyAll.set(k, (globalMonthlyAll.get(k) ?? 0) + v);
+      for (const [k, v] of yearlyBucket) globalYearly.set(k, (globalYearly.get(k) ?? 0) + v);
+
+      // Per-portfolio: weekly-52 cumulative series
+      const weekly52Series = (() => {
+        const series: { label: string; realized: number }[] = [];
+        const todayMidnight = ensureUtcMidnight(now);
+        const todayDay = todayMidnight.getUTCDay();
+        const thisMonday = new Date(todayMidnight.getTime() - (todayDay === 0 ? 6 : todayDay - 1) * DAY_MS);
+        const startMonday = new Date(thisMonday.getTime() - 51 * 7 * DAY_MS);
+        let run = 0;
+        for (let d = new Date(startMonday); d.getTime() <= thisMonday.getTime(); d = new Date(d.getTime() + 7 * DAY_MS)) {
+          const key = toIsoDayUTC(d);
+          run += weekly52Bucket.get(key) ?? 0;
+          series.push({ label: key, realized: run });
+        }
+        return series;
+      })();
+
+      // Per-portfolio: last-12-months cumulative series
+      const monthly12Series = (() => {
+        const series: { label: string; realized: number }[] = [];
+        const endYear = now.getUTCFullYear();
+        const endMonth = now.getUTCMonth();
+        let run = 0;
+        for (let d = new Date(Date.UTC(endYear, endMonth - 11, 1)); ; d = new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth() + 1, 1))) {
+          const key = toIsoMonthUTC(d);
+          run += monthlyAllBucket.get(key) ?? 0;
+          series.push({ label: key, realized: run });
+          if (d.getUTCFullYear() === endYear && d.getUTCMonth() === endMonth) break;
+        }
+        return series;
+      })();
+
+      // Per-portfolio: all-time monthly cumulative series
+      const monthlyAllSeries = (() => {
+        if (monthlyAllBucket.size === 0) return [];
+        const keys = Array.from(monthlyAllBucket.keys()).sort();
+        const [fy, fm] = keys[0].split("-").map(Number);
+        const endYear = now.getUTCFullYear();
+        const endMonth = now.getUTCMonth();
+        const series: { label: string; realized: number }[] = [];
+        let run = 0;
+        for (let d = new Date(Date.UTC(fy, fm - 1, 1)); ; d = new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth() + 1, 1))) {
+          const key = toIsoMonthUTC(d);
+          run += monthlyAllBucket.get(key) ?? 0;
+          series.push({ label: key, realized: run });
+          if (d.getUTCFullYear() === endYear && d.getUTCMonth() === endMonth) break;
+        }
+        return series;
+      })();
+
+      // Per-portfolio: yearly cumulative series
+      const yearlySeries = (() => {
+        if (yearlyBucket.size === 0) return [];
+        const years = Array.from(yearlyBucket.keys()).map(Number).sort();
+        const currentYear = now.getUTCFullYear();
+        const series: { label: string; realized: number }[] = [];
+        let run = 0;
+        for (let y = years[0]; y <= currentYear; y++) {
+          run += yearlyBucket.get(String(y)) ?? 0;
+          series.push({ label: String(y), realized: run });
+        }
+        return series;
+      })();
+
+      // Convert per-portfolio buckets to ordered cumulative series
+      const mtdSeries = (() => {
+        const series: { label: string; realized: number }[] = [];
+        const start = monthStart;
+        const today = ensureUtcMidnight(now);
+        let run = 0;
+        for (
+          let d = new Date(start);
+          d.getTime() <= today.getTime();
+          d = new Date(d.getTime() + DAY_MS)
+        ) {
+          const key = toIsoDayUTC(d);
+          run += mtdDailyBucket.get(key) ?? 0;
+          series.push({ label: key, realized: run });
+        }
+        return series;
+      })();
+
+      const ytdSeries = (() => {
+        const series: { label: string; realized: number }[] = [];
+        const first = yearStart;
+        let cursor = new Date(Date.UTC(first.getUTCFullYear(), 0, 1));
+        const lastMonthIndex = now.getUTCMonth();
+        let run = 0;
+        for (let m = 0; m <= lastMonthIndex; m++) {
+          const key = `${cursor.getUTCFullYear()}-${String(cursor.getUTCMonth() + 1).padStart(2, "0")}`;
+          run += ytdMonthlyBucket.get(key) ?? 0;
+          series.push({ label: key, realized: run });
+          cursor = new Date(
+            Date.UTC(cursor.getUTCFullYear(), cursor.getUTCMonth() + 1, 1),
+          );
+        }
+        return series;
+      })();
+
+      const daily90Series = (() => {
+        const series: { label: string; realized: number }[] = [];
+        const start = ninetyStart;
+        const today = ensureUtcMidnight(now);
+        let run = 0;
+        for (
+          let d = new Date(start);
+          d.getTime() <= today.getTime();
+          d = new Date(d.getTime() + DAY_MS)
+        ) {
+          const key = toIsoDayUTC(d);
+          run += daily90Bucket.get(key) ?? 0;
+          series.push({ label: key, realized: run });
+        }
+        return series;
+      })();
+
+      // Capital figures
+      const starting = Number(p.startingCapital ?? 0);
+      const netCapitalAdj = p.capitalTransactions.reduce(
+        (sum, t) => sum + (t.type === "deposit" ? Number(t.amount) : -Number(t.amount)),
+        0,
+      );
+      const capitalBase = starting + netCapitalAdj;
+      const currentCapital = capitalBase + totalProfitAll; // realized adjusts the base
+      const cashAvailable = currentCapital - capitalInUse;
+
+      return [
+        p.id,
+        {
+          portfolioId: p.id,
+          name: p.name,
+          startingCapital: starting,
+          additionalCapital: netCapitalAdj,
+          capitalBase,
+          currentCapital,
+          totalProfitAll,
+          openCount: openTrades.length,
+          capitalInUse,
+          capitalInUseOptions,
+          capitalInUseStocks,
+          cashAvailable,
+          biggest,
+          topTickers,
+          nextExpiration,
+          expiringSoonCount,
+          openAvgDays,
+          winRate,
+          avgDaysInTrade,
+          closedTradeCount: closedAll.length,
+          realizedMTD,
+          realizedYTD,
+          realized7D,
+          winRate7D: ws7D.total > 0 ? (ws7D.wins / ws7D.total) * 100 : null,
+          winRateMTD: wsMTD.total > 0 ? (wsMTD.wins / wsMTD.total) * 100 : null,
+          winRateYTD: wsYTD.total > 0 ? (wsYTD.wins / wsYTD.total) * 100 : null,
+          winCount7D: ws7D.wins, closedCount7D: ws7D.total,
+          winCountMTD: wsMTD.wins, closedCountMTD: wsMTD.total,
+          winCountYTD: wsYTD.wins, closedCountYTD: wsYTD.total,
+          // per-portfolio visuals data
+          exposures: Array.from(exposureByTicker.entries())
+            .map(([ticker, capital]) => ({
+              ticker,
+              capital,
+              pct: (capital / totalColl) * 100,
+            }))
+            .sort((a, b) => b.capital - a.capital),
+          premiumByTicker: perPremiumArray,
+          pnlSeriesMTD: mtdSeries,
+          pnlSeriesYTD: ytdSeries,
+          pnlSeriesDaily90: daily90Series,
+          pnlSeriesWeekly52: weekly52Series,
+          pnlSeriesMonthly12: monthly12Series,
+          pnlSeriesMonthlyAll: monthlyAllSeries,
+          pnlSeriesYearly: yearlySeries,
+          openTradesList: openTrades.map((t) => ({
+            id: t.id,
+            ticker: t.ticker,
+            type: t.type as string,
+            strikePrice: Number(t.strikePrice),
+            contractsOpen: Number(t.contractsOpen ?? 0),
+            expirationDate: new Date(t.expirationDate).toISOString().slice(0, 10),
+            contractPrice: Number(t.contractPrice),
+            collateral: collateralFor(t.strikePrice, t.contractsOpen),
+            portfolioId: p.id,
+            portfolioName: p.name,
+          })),
+        },
+      ] as const;
+    }),
+  );
+
+  const perPortfolio = Object.fromEntries(perPortfolioEntries);
+
+  // Global open trades list (all portfolios, sorted by expiry then collateral)
+  const openTrades = Object.values(perPortfolio)
+    .flatMap((p) => p.openTradesList)
+    .sort((a, b) => {
+      const dateDiff = a.expirationDate.localeCompare(b.expirationDate);
+      return dateDiff !== 0 ? dateDiff : b.collateral - a.collateral;
+    });
+
+  // Global premium-by-ticker recomputed from per-portfolio arrays (idempotent per request)
+  const globalPremiumMap = new Map<string, number>();
+  for (const p of Object.values(perPortfolio)) {
+    const arr = p.premiumByTicker as
+      | Array<{ ticker: string; premium: number }>
+      | undefined;
+    if (!Array.isArray(arr)) continue;
+    for (const row of arr) {
+      if (!row?.ticker) continue;
+      globalPremiumMap.set(
+        row.ticker,
+        (globalPremiumMap.get(row.ticker) ?? 0) + Number(row.premium || 0),
+      );
+    }
+  }
+  const premiumByTicker = Array.from(globalPremiumMap.entries())
+    .map(([ticker, premium]) => ({ ticker, premium }))
+    .sort((a, b) => b.premium - a.premium);
+
+  // 3) Totals & aggregates across portfolios
+  const baseTotals = Object.values(perPortfolio).reduce(
+    (acc, p) => {
+      acc.portfolioCount += 1;
+      acc.capitalBase += p.capitalBase;
+      acc.currentCapital += p.currentCapital;
+      acc.capitalInUse += p.capitalInUse;
+      acc.cashAvailable += p.cashAvailable;
+      acc.realizedMTD += p.realizedMTD;
+      acc.realizedYTD += p.realizedYTD;
+      acc.realized7D += p.realized7D;
+      acc.winCount7D += p.winCount7D; acc.closedCount7D += p.closedCount7D;
+      acc.winCountMTD += p.winCountMTD; acc.closedCountMTD += p.closedCountMTD;
+      acc.winCountYTD += p.winCountYTD; acc.closedCountYTD += p.closedCountYTD;
+      return acc;
+    },
+    {
+      portfolioCount: 0,
+      capitalBase: 0,
+      currentCapital: 0,
+      capitalInUse: 0,
+      cashAvailable: 0,
+      realizedMTD: 0,
+      realizedYTD: 0,
+      realized7D: 0,
+      winCount7D: 0, closedCount7D: 0,
+      winCountMTD: 0, closedCountMTD: 0,
+      winCountYTD: 0, closedCountYTD: 0,
+    },
+  );
+
+  const percentUsed =
+    baseTotals.currentCapital > 0
+      ? (baseTotals.capitalInUse / baseTotals.currentCapital) * 100
+      : 0;
+  const globalWinRate7D = baseTotals.closedCount7D > 0 ? (baseTotals.winCount7D / baseTotals.closedCount7D) * 100 : null;
+  const globalWinRateMTD = baseTotals.closedCountMTD > 0 ? (baseTotals.winCountMTD / baseTotals.closedCountMTD) * 100 : null;
+  const globalWinRateYTD = baseTotals.closedCountYTD > 0 ? (baseTotals.winCountYTD / baseTotals.closedCountYTD) * 100 : null;
+
+  // Global ordered cumulative MTD/YTD series
+  const mtdSeries: { label: string; realized: number }[] = (() => {
+    const series: { label: string; realized: number }[] = [];
+    const start = monthStart;
+    const today = ensureUtcMidnight(now);
+    let run = 0;
+    for (
+      let d = new Date(start);
+      d.getTime() <= today.getTime();
+      d = new Date(d.getTime() + DAY_MS)
+    ) {
+      const key = toIsoDayUTC(d);
+      run += globalMtdDaily.get(key) ?? 0;
+      series.push({ label: key, realized: run });
+    }
+    return series;
+  })();
+
+  const ytdSeries: { label: string; realized: number }[] = (() => {
+    const series: { label: string; realized: number }[] = [];
+    const first = yearStart;
+    // Start at Jan 1 (UTC) of the current year
+    let cursor = new Date(Date.UTC(first.getUTCFullYear(), 0, 1));
+    const lastMonthIndex = now.getUTCMonth();
+    let run = 0;
+    for (let m = 0; m <= lastMonthIndex; m++) {
+      const key = `${cursor.getUTCFullYear()}-${String(cursor.getUTCMonth() + 1).padStart(2, "0")}`;
+      run += globalYtdMonthly.get(key) ?? 0;
+      series.push({ label: key, realized: run });
+      cursor = new Date(
+        Date.UTC(cursor.getUTCFullYear(), cursor.getUTCMonth() + 1, 1),
+      );
+    }
+    return series;
+  })();
+
+  // Global weekly-52 cumulative series
+  const globalWeekly52Series: { label: string; realized: number }[] = (() => {
+    const todayMidnight = ensureUtcMidnight(now);
+    const todayDay = todayMidnight.getUTCDay();
+    const thisMonday = new Date(todayMidnight.getTime() - (todayDay === 0 ? 6 : todayDay - 1) * DAY_MS);
+    const startMonday = new Date(thisMonday.getTime() - 51 * 7 * DAY_MS);
+    const series: { label: string; realized: number }[] = [];
+    let run = 0;
+    for (let d = new Date(startMonday); d.getTime() <= thisMonday.getTime(); d = new Date(d.getTime() + 7 * DAY_MS)) {
+      const key = toIsoDayUTC(d);
+      run += globalWeekly52.get(key) ?? 0;
+      series.push({ label: key, realized: run });
+    }
+    return series;
+  })();
+
+  // Global last-12-months cumulative series
+  const globalMonthly12Series: { label: string; realized: number }[] = (() => {
+    const endYear = now.getUTCFullYear();
+    const endMonth = now.getUTCMonth();
+    const series: { label: string; realized: number }[] = [];
+    let run = 0;
+    for (let d = new Date(Date.UTC(endYear, endMonth - 11, 1)); ; d = new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth() + 1, 1))) {
+      const key = toIsoMonthUTC(d);
+      run += globalMonthlyAll.get(key) ?? 0;
+      series.push({ label: key, realized: run });
+      if (d.getUTCFullYear() === endYear && d.getUTCMonth() === endMonth) break;
+    }
+    return series;
+  })();
+
+  // Global all-time monthly cumulative series
+  const globalMonthlyAllSeries: { label: string; realized: number }[] = (() => {
+    if (globalMonthlyAll.size === 0) return [];
+    const keys = Array.from(globalMonthlyAll.keys()).sort();
+    const [fy, fm] = keys[0].split("-").map(Number);
+    const endYear = now.getUTCFullYear();
+    const endMonth = now.getUTCMonth();
+    const series: { label: string; realized: number }[] = [];
+    let run = 0;
+    for (let d = new Date(Date.UTC(fy, fm - 1, 1)); ; d = new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth() + 1, 1))) {
+      const key = toIsoMonthUTC(d);
+      run += globalMonthlyAll.get(key) ?? 0;
+      series.push({ label: key, realized: run });
+      if (d.getUTCFullYear() === endYear && d.getUTCMonth() === endMonth) break;
+    }
+    return series;
+  })();
+
+  // Global yearly cumulative series
+  const globalYearlySeries: { label: string; realized: number }[] = (() => {
+    if (globalYearly.size === 0) return [];
+    const years = Array.from(globalYearly.keys()).map(Number).sort();
+    const currentYear = now.getUTCFullYear();
+    const series: { label: string; realized: number }[] = [];
+    let run = 0;
+    for (let y = years[0]; y <= currentYear; y++) {
+      run += globalYearly.get(String(y)) ?? 0;
+      series.push({ label: String(y), realized: run });
+    }
+    return series;
+  })();
+
+  // Global 90-day daily cumulative series
+  const daily90Series: { label: string; realized: number }[] = (() => {
+    const series: { label: string; realized: number }[] = [];
+    const start = ninetyStart;
+    const today = ensureUtcMidnight(now);
+    let run = 0;
+    for (
+      let d = new Date(start);
+      d.getTime() <= today.getTime();
+      d = new Date(d.getTime() + DAY_MS)
+    ) {
+      const key = toIsoDayUTC(d);
+      run += globalDaily90.get(key) ?? 0;
+      series.push({ label: key, realized: run });
+    }
+    return series;
+  })();
+
+  // Derive global exposures as % of total deployed capital (options + stock lots)
+  const totalDeployedCap = baseTotals.capitalInUse || 1;
+  const exposures = Array.from(globalExposureMap.entries())
+    .map(([ticker, capital]) => ({
+      ticker,
+      capital,
+      pct: (capital / totalDeployedCap) * 100,
+    }))
+    .sort((a, b) => b.capital - a.capital);
+
+  // Global next expiration (earliest FUTURE date, contracts > 0, with top ticker on that date)
+  let nextExpiration: {
+    date: string;
+    contracts: number;
+    topTicker?: string;
+  } | null = null;
+
+  if (allOpenForNext.length > 0) {
+    // fold into UTC-day buckets numerically
+    const byDay = new Map<
+      number,
+      { contracts: number; byTicker: Map<string, number> }
+    >();
+    const todayKey = ensureUtcMidnight(now).getTime();
+
+    for (const row of allOpenForNext) {
+      const dayKey = ensureUtcMidnight(row.dateIso).getTime();
+      const contracts = Math.trunc(Number(row.contracts));
+      if (!Number.isFinite(dayKey)) continue; // skip invalid dates
+      if (contracts <= 0) continue;
+      if (dayKey < todayKey) continue;
+
+      const entry = byDay.get(dayKey) ?? {
+        contracts: 0,
+        byTicker: new Map<string, number>(),
+      };
+      entry.contracts += contracts;
+      entry.byTicker.set(
+        row.ticker,
+        (entry.byTicker.get(row.ticker) ?? 0) + contracts,
+      );
+      byDay.set(dayKey, entry);
+    }
+
+    const earliest = Array.from(byDay.entries()).sort((a, b) => a[0] - b[0])[0];
+    if (earliest) {
+      const [dayKey, info] = earliest;
+      let topTicker: string | undefined;
+      let topCount = -1;
+      for (const [tk, cnt] of info.byTicker.entries()) {
+        if (cnt > topCount) {
+          topCount = cnt;
+          topTicker = tk;
+        }
+      }
+      nextExpiration = {
+        date: new Date(dayKey).toISOString().slice(0, 10),
+        contracts: info.contracts,
+        topTicker,
+      };
+    }
+  }
+
+  // Global top tickers by CSP collateral
+  const aggTickerMap = new Map<string, number>();
+  for (const p of Object.values(perPortfolio)) {
+    for (const t of p.topTickers) {
+      aggTickerMap.set(
+        t.ticker,
+        (aggTickerMap.get(t.ticker) ?? 0) + t.collateral,
+      );
+    }
+  }
+  const topTickers = Array.from(aggTickerMap.entries())
+    .sort((a, b) => b[1] - a[1])
+    .slice(0, 5)
+    .map(([ticker, collateral]) => ({ ticker, collateral }));
+
+  return NextResponse.json({
+    perPortfolio,
+    totals: {
+      ...baseTotals, percentUsed,
+      realized7D: baseTotals.realized7D,
+      winRate7D: globalWinRate7D,
+      winRateMTD: globalWinRateMTD,
+      winRateYTD: globalWinRateYTD,
+    },
+    nextExpiration,
+    topTickers,
+    exposures,
+    premiumByTicker,
+    pnlSeriesMTD: mtdSeries,
+    pnlSeriesYTD: ytdSeries,
+    pnlSeriesDaily90: daily90Series,
+    pnlSeriesWeekly52: globalWeekly52Series,
+    pnlSeriesMonthly12: globalMonthly12Series,
+    pnlSeriesMonthlyAll: globalMonthlyAllSeries,
+    pnlSeriesYearly: globalYearlySeries,
+    openTrades,
+  });
+}

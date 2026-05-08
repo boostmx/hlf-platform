@@ -1,0 +1,54 @@
+import { auth } from "@/server/auth/auth";
+import { prisma } from "@/server/prisma";
+import { NextResponse } from "next/server";
+import { getEffectiveUserId } from "@/server/auth/getEffectiveUserId";
+
+export async function GET(): Promise<NextResponse> {
+  const session = await auth();
+
+  if (!session?.user?.id) {
+    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  }
+
+  try {
+    const uid = await getEffectiveUserId(session.user.id, session.user.isAdmin ?? false);
+    const portfolios = await prisma.portfolio.findMany({
+      where: { userId: uid },
+      orderBy: { createdAt: "asc" },
+    });
+
+    return NextResponse.json(portfolios);
+  } catch {
+    return NextResponse.json(
+      { error: "Internal Server Error" },
+      { status: 500 },
+    );
+  }
+}
+
+export async function POST(req: Request): Promise<NextResponse> {
+  const session = await auth();
+
+  if (!session?.user?.id) {
+    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  }
+
+  const { name, startingCapital } = await req.json();
+
+  if (!name || startingCapital === undefined) {
+    return NextResponse.json(
+      { error: "Missing required fields" },
+      { status: 400 },
+    );
+  }
+
+  const portfolio = await prisma.portfolio.create({
+    data: {
+      name,
+      userId: session.user.id,
+      startingCapital,
+    },
+  });
+
+  return NextResponse.json(portfolio, { status: 201 });
+}

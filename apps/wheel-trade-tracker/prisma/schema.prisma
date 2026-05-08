@@ -1,0 +1,165 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id             String          @id @default(cuid())
+  firstName      String
+  lastName       String
+  email          String          @unique
+  bio            String?
+  avatarUrl      String?
+  isAdmin        Boolean         @default(false)
+  username       String          @unique
+  password       String
+  createdAt      DateTime        @default(now())
+  portfolios     Portfolio[]
+  watchlistItems WatchlistItem[]
+  journalEntries JournalEntry[]
+}
+
+model JournalEntry {
+  id        String   @id @default(cuid())
+  userId    String
+  yearMonth String   // "YYYY-MM"
+  notes     String   @default("")
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, yearMonth])
+  @@index([userId])
+}
+
+model WatchlistItem {
+  id        String   @id @default(cuid())
+  userId    String
+  ticker    String
+  order     Int      @default(0)
+  createdAt DateTime @default(now())
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, ticker])
+  @@index([userId])
+}
+
+model Portfolio {
+  id                  String               @id @default(cuid())
+  name                String
+  userId              String
+  startingCapital     Decimal              @default(0)
+  createdAt           DateTime             @default(now())
+  notes               String?
+  updatedAt           DateTime?            @updatedAt
+  user                User                 @relation(fields: [userId], references: [id], onDelete: Cascade)
+  trades              Trade[]
+  stockLot            StockLot[]
+  capitalTransactions CapitalTransaction[]
+
+  @@index([userId])
+}
+
+model CapitalTransaction {
+  id          String          @id @default(cuid())
+  portfolioId String
+  portfolio   Portfolio       @relation(fields: [portfolioId], references: [id], onDelete: Cascade)
+  type        TransactionType
+  amount      Decimal         @db.Decimal(18, 2)
+  note        String?
+  date        DateTime        @default(now())
+  createdAt   DateTime        @default(now())
+
+  @@index([portfolioId])
+}
+
+enum TransactionType {
+  deposit
+  withdrawal
+}
+
+model Trade {
+  id               String      @id @default(cuid())
+  ticker           String
+  strikePrice      Float
+  expirationDate   DateTime
+  type             TradeType
+  contracts        Int
+  contractPrice    Float
+  entryPrice       Float?
+  status           TradeStatus @default(open)
+  closedAt         DateTime?
+  closingPrice     Float?
+  premiumCaptured  Float?
+  percentPL        Float?
+  portfolioId      String
+  createdAt        DateTime    @default(now())
+  notes            String?
+  contractsInitial Int
+  contractsOpen    Int
+  closeReason      CloseReason?
+  portfolio        Portfolio   @relation(fields: [portfolioId], references: [id], onDelete: Cascade)
+  stockLot         StockLot?   @relation(fields: [stockLotId], references: [id])
+  stockLotId       String?
+
+  @@index([status, portfolioId])
+  @@index([portfolioId, status, closedAt])
+  @@index([expirationDate, portfolioId])
+  @@index([ticker, portfolioId])
+}
+
+enum TradeType {
+  Put
+  Call
+  CoveredCall
+  CashSecuredPut
+}
+
+enum TradeStatus {
+  open
+  closed
+}
+
+enum CloseReason {
+  manual
+  expiredWorthless
+  assigned
+}
+
+model StockLot {
+  id          String    @id @default(cuid())
+  portfolioId String
+  portfolio   Portfolio @relation(fields: [portfolioId], references: [id], onDelete: Cascade)
+
+  ticker  String
+  shares  Int
+  avgCost Decimal @db.Decimal(18, 6) // per-share cost basis
+
+  status StockLotStatus @default(OPEN)
+
+  openedAt DateTime  @default(now())
+  closedAt DateTime?
+
+  closePrice  Decimal? @db.Decimal(18, 6)
+  realizedPnl Decimal? @db.Decimal(18, 2)
+
+  notes String? // <-- NEW
+
+  trades Trade[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([portfolioId, ticker])
+  @@index([portfolioId, status])
+  @@index([portfolioId, closedAt])
+}
+
+enum StockLotStatus {
+  OPEN
+  CLOSED
+}
