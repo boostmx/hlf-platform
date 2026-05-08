@@ -10,8 +10,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { getLatestVersion } from "@/data/changelog";
-
-
+import { ThemeToggle } from "@/components/theme-toggle";
 
 const FEATURES = [
   { icon: TrendingDown, label: "RSI + support/resistance entry signals" },
