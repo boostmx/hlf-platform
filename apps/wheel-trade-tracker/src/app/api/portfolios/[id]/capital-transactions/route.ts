@@ -2,7 +2,7 @@ import { prisma } from "@/server/prisma";
 import { NextResponse } from "next/server";
 import { auth } from "@/server/auth/auth";
 import { getEffectiveUserId } from "@/server/auth/getEffectiveUserId";
-import { Prisma } from "@prisma/client";
+import { Prisma } from "@/generated/prisma/client";
 
 export const dynamic = "force-dynamic";
 

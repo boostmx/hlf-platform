@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { requireAuth } from "@/server/auth/requireAuth";
 import prisma from "@/server/prisma";
-import { Prisma } from "@prisma/client";
+import { Prisma } from "@/generated/prisma/client";
 
 function daysInMonth(year: number, month: number) {
   return new Date(year, month, 0).getDate();

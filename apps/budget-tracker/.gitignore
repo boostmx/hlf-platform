@@ -32,3 +32,4 @@ next-env.d.ts
 
 # Prisma
 prisma/*.db
+src/generated/

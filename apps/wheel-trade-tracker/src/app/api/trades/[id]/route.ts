@@ -3,7 +3,7 @@ import { prisma } from "@/server/prisma";
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/server/auth/auth";
 import { NextResponse } from "next/server";
-import { CloseReason, Prisma, TradeType } from "@prisma/client";
+import { CloseReason, Prisma, TradeType } from "@/generated/prisma/client";
 
 export async function GET(
   _req: Request,

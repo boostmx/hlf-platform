@@ -2,7 +2,7 @@ import { prisma } from "@/server/prisma";
 import { NextResponse } from "next/server";
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/server/auth/auth";
-import type { Trade } from "@prisma/client";
+import type { Trade } from "@/generated/prisma/client";
 
 export async function PATCH(
   req: Request,
