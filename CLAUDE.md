@@ -106,7 +106,7 @@ Apps are being migrated from separate repos. Current state:
 - [ ] `hlf-wheel-alerts` — not yet moved
 - [ ] `hlf-website` — not yet moved
 - [ ] `hungvnguyen-site` — not yet moved
-- [x] `packages/auth-db` — ready, awaiting auth DB provisioning
+- [x] `packages/auth-db` — ready, auth DB live (`nozomi.proxy.rlwy.net:14507`)
 - [x] `packages/typescript-config` — done
 - [x] `packages/eslint-config` — done
 - [ ] `packages/ui` — shell only, components to be moved from apps
