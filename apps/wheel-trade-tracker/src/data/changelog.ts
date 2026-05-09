@@ -6,6 +6,13 @@ export interface ChangelogEntry {
 
 export const changelog: ChangelogEntry[] = [
   {
+    date: "2026-05-08",
+    version: "v2.14.2",
+    highlights: [
+      "Moved to the HLF Platform monorepo — all three HLF apps now live in a single codebase, share a common component library, and deploy from one place. No changes to features or data.",
+    ],
+  },
+  {
     date: "2026-05-07",
     version: "v2.14.1",
     highlights: [
