@@ -11,7 +11,7 @@ apps/
   wheel-strat-tracker/   Options wheel strategy tracker (hub — data source for suite)
   hlf-bookkeeping/       Finance & trading P&L bookkeeping
   hlf-budgettracker/     Monthly budget tracker + FIRE dashboard
-  hlf-wheel-alerts/      Stock ticker alert system (standalone DB)
+  stock-alerts/          Stock ticker alert system (own DB; cron disabled until batch refactor)
   hlf-website/           Marketing site (static)
   hungvnguyen-site/      Personal portfolio (static)
 
@@ -31,7 +31,7 @@ packages/
 | `wheel-strat-tracker` | 3000 | Emerald | `ballast` Railway |
 | `hlf-bookkeeping` | 3001 | Indigo | `turntable:21201` Railway |
 | `hlf-budgettracker` | 3002 | Teal | `shuttle` Railway |
-| `hlf-wheel-alerts` | 3003 | Violet | `turntable:51073` Railway |
+| `stock-alerts` | 3003 | Violet | own Railway (set `DATABASE_URL`) |
 
 ---
 
@@ -87,7 +87,10 @@ wheel-strat-tracker exposes `/api/internal/v1/` (bearer: `INTERNAL_API_KEY`):
 | `NEXTAUTH_SECRET` | All HLF apps | **Must be identical** for cross-app JWT validity |
 | `NEXTAUTH_URL` | All HLF apps | Drives `sharedCookieConfig()` — must start with `https://` in prod for SSO cookie to be issued |
 | `INTERNAL_API_KEY` | wheel-tracker + consumers | Bearer token for internal API |
-| `WHEEL_TRACKER_URL` | bookkeeping, wheel-alerts | Base URL for internal API calls |
+| `WHEEL_TRACKER_URL` | bookkeeping, stock-alerts | Base URL for internal API calls |
+| `ALPACA_API_KEY` / `ALPACA_SECRET_KEY` | stock-alerts | Alpaca market data |
+| `ANTHROPIC_API_KEY` | stock-alerts | Claude Haiku for alert messages (optional) |
+| `RESEND_API_KEY` / `RESEND_FROM_EMAIL` | stock-alerts | Email delivery |
 
 ---
 
@@ -110,11 +113,11 @@ Apps moved into the monorepo:
 - [x] `wheel-strat-tracker` — in monorepo, on shared auth DB (v2.15.0)
 - [x] `hlf-bookkeeping` — in monorepo, on shared auth DB (v1.3.0)
 - [x] `hlf-budgettracker` — in monorepo, on shared auth DB (v1.1.0)
-- [ ] `hlf-wheel-alerts` — not yet moved
+- [x] `stock-alerts` — in monorepo, on shared auth DB (v2.0.0); cron jobs intentionally not ported pending batch refactor
 - [ ] `hlf-website` — not yet moved
 - [ ] `hungvnguyen-site` — not yet moved
-- [x] `packages/auth-db` — auth DB live (`nozomi.proxy.rlwy.net:14507`); all 3 HLF apps consume it
-- [x] Local `User` tables dropped from all 3 app DBs (2026-05-09)
+- [x] `packages/auth-db` — auth DB live (`nozomi.proxy.rlwy.net:14507`); all 4 HLF apps consume it
+- [x] Local `User` tables dropped from all 3 original app DBs (2026-05-09)
 - [x] `packages/typescript-config` — done
 - [x] `packages/eslint-config` — done
 - [ ] `packages/ui` — shell only, components to be moved from apps
