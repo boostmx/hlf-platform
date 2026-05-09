@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/server/auth/auth";
-import { prisma } from "@/server/prisma";
+import { authPrisma } from "@hlf/auth-db";
 import { cookies } from "next/headers";
 
 const COOKIE_OPTS = {
@@ -24,7 +24,7 @@ export async function GET() {
     return NextResponse.json(null);
   }
 
-  const user = await prisma.user.findUnique({
+  const user = await authPrisma.user.findUnique({
     where: { id: impersonateId },
     select: { id: true, username: true, firstName: true, lastName: true },
   });
@@ -47,7 +47,7 @@ export async function POST(req: Request) {
 
   const { userId } = await req.json();
 
-  const user = await prisma.user.findUnique({
+  const user = await authPrisma.user.findUnique({
     where: { id: userId },
     select: { id: true, username: true, firstName: true, lastName: true },
   });

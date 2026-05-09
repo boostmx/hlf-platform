@@ -6,6 +6,15 @@ export interface ChangelogEntry {
 
 export const changelog: ChangelogEntry[] = [
   {
+    date: "2026-05-09",
+    version: "v2.15.0",
+    highlights: [
+      "Unified sign-in across the HLF suite — your account now lives in a single shared auth database, so the same username and password work in Wheel Tracker, Bookkeeping, and Budget Tracker. Profile and password changes made in any app update everywhere.",
+      "Single sign-on across subdomains — signing into one HLF app signs you in to all of them automatically (production only; localhost dev still uses per-app cookies).",
+      "Behind the scenes: dropped the local User table and its three foreign keys in favor of opaque userId references to the shared auth DB. Admin user list and delete were rewritten to span both databases.",
+    ],
+  },
+  {
     date: "2026-05-08",
     version: "v2.14.2",
     highlights: [

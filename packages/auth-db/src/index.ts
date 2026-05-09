@@ -10,3 +10,4 @@ if (process.env.NODE_ENV !== "production") {
 }
 
 export type { User } from "./generated/prisma";
+export { sharedCookieConfig } from "./cookies";

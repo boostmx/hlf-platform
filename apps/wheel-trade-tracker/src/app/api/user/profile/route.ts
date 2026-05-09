@@ -1,4 +1,4 @@
-import { prisma } from "@/server/prisma";
+import { authPrisma } from "@hlf/auth-db";
 import { NextResponse } from "next/server";
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/server/auth/auth";
@@ -9,7 +9,7 @@ export async function GET() {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
-  const user = await prisma.user.findUnique({
+  const user = await authPrisma.user.findUnique({
     where: { id: session.user.id },
     select: {
       id: true,
@@ -54,13 +54,13 @@ export async function PATCH(req: Request) {
   }
 
   if (typeof body.email === "string") {
-    const existing = await prisma.user.findFirst({ where: { email: body.email } });
+    const existing = await authPrisma.user.findFirst({ where: { email: body.email } });
     if (existing && existing.id !== session.user.id) {
       return NextResponse.json({ error: "Email already in use" }, { status: 409 });
     }
   }
 
-  const updated = await prisma.user.update({
+  const updated = await authPrisma.user.update({
     where: { id: session.user.id },
     data: {
       ...(typeof body.firstName === "string" ? { firstName: body.firstName } : {}),

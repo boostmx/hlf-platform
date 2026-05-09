@@ -1,12 +1,12 @@
 import { NextRequest, NextResponse } from "next/server";
 import { requireAuth } from "@/server/auth/requireAuth";
-import prisma from "@/server/prisma";
+import { authPrisma } from "@hlf/auth-db";
 
 export async function GET() {
   const auth = await requireAuth();
   if (!auth.ok) return auth.response;
 
-  const user = await prisma.user.findUnique({
+  const user = await authPrisma.user.findUnique({
     where: { id: auth.userId },
     select: { id: true, username: true, firstName: true, lastName: true, email: true, bio: true, avatarUrl: true, isAdmin: true, createdAt: true },
   });
@@ -23,7 +23,7 @@ export async function PATCH(req: NextRequest) {
     firstName?: string; lastName?: string; email?: string; bio?: string | null;
   };
 
-  const updated = await prisma.user.update({
+  const updated = await authPrisma.user.update({
     where: { id: auth.userId },
     data: {
       firstName: body.firstName,

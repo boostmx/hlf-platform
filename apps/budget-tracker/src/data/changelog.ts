@@ -8,6 +8,16 @@ export interface ChangelogEntry {
 
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    version: "v1.1.0",
+    date: "2026-05-09",
+    title: "Shared Auth & Single Sign-On",
+    highlights: [
+      "Unified sign-in across the HLF suite — your account now lives in a single shared auth database, so the same username and password work in Wheel Tracker, Bookkeeping, and Budget Tracker. Profile and password changes made in any app update everywhere.",
+      "Single sign-on across subdomains — signing into one HLF app signs you in to all of them automatically (production only).",
+      "Behind the scenes: removed the local User table and the unused NextAuth adapter tables (Account, Session, VerificationToken); auth flows now read and write through the shared @hlf/auth-db package.",
+    ],
+  },
+  {
     version: "v1.0.1",
     date: "2026-05-08",
     title: "Monorepo Migration",

@@ -19,8 +19,8 @@ vi.mock("@/server/auth/auth", () => ({ authOptions: {} }));
 vi.mock("next/headers", () => ({
   cookies: vi.fn().mockResolvedValue({ get: mockCookieGet, set: mockCookieSet, delete: mockCookieDelete }),
 }));
-vi.mock("@/server/prisma", () => ({
-  prisma: { user: { findUnique: mockUserFindUnique } },
+vi.mock("@hlf/auth-db", () => ({
+  authPrisma: { user: { findUnique: mockUserFindUnique } },
 }));
 
 import { GET, POST, DELETE } from "@/app/api/admin/impersonate/route";
