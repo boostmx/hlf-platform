@@ -1,10 +1,11 @@
 import { prisma } from "../src/server/prisma";
+import { authPrisma } from "@hlf/auth-db";
 
 async function main() {
-  const user = await prisma.user.findUnique({ where: { username: "admin" } });
+  const user = await authPrisma.user.findUnique({ where: { username: "admin" } });
 
   if (!user) {
-    console.log("⚠️  Admin user not found. Run wheel-strat-tracker seed first.");
+    console.log("⚠️  Admin user not found in auth DB.");
     process.exit(1);
   }
 

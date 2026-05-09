@@ -1,6 +1,6 @@
 {
   "name": "wheel-strat-tracker",
-  "version": "2.14.2",
+  "version": "2.15.0",
   "private": true,
   "scripts": {
     "dev": "next dev --port 3000",
@@ -50,7 +50,8 @@
     "sonner": "^2.0.6",
     "swr": "^2.3.4",
     "tailwind-merge": "^3.3.1",
-    "@hlf/ui": "workspace:*"
+    "@hlf/ui": "workspace:*",
+    "@hlf/auth-db": "workspace:*"
   },
   "devDependencies": {
     "@eslint/eslintrc": "^3",

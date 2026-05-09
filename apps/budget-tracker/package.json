@@ -1,6 +1,6 @@
 {
   "name": "hlf-budgettracker",
-  "version": "1.0.1",
+  "version": "1.1.0",
   "private": true,
   "scripts": {
     "dev": "next dev --port 3002",
@@ -46,7 +46,8 @@
     "sonner": "^2.0.6",
     "swr": "^2.3.4",
     "tailwind-merge": "^3.3.1",
-    "@hlf/ui": "workspace:*"
+    "@hlf/ui": "workspace:*",
+    "@hlf/auth-db": "workspace:*"
   },
   "devDependencies": {
     "@eslint/eslintrc": "^3",

@@ -1,7 +1,7 @@
 // app/api/auth/signup/route.ts
 import { NextResponse } from "next/server";
 import bcrypt from "bcrypt";
-import { prisma } from "@/server/db";
+import { authPrisma } from "@hlf/auth-db";
 
 export async function POST(req: Request) {
   const { firstName, lastName, email, username, password } = await req.json();
@@ -13,7 +13,7 @@ export async function POST(req: Request) {
     );
   }
 
-  const existingUser = await prisma.user.findFirst({
+  const existingUser = await authPrisma.user.findFirst({
     where: {
       OR: [{ username }, { email }],
     },
@@ -28,7 +28,7 @@ export async function POST(req: Request) {
 
   const hashedPassword = await bcrypt.hash(password, 10);
 
-  const newUser = await prisma.user.create({
+  const newUser = await authPrisma.user.create({
     data: {
       firstName,
       lastName,

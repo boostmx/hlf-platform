@@ -1,12 +1,10 @@
-import { PrismaAdapter } from "@next-auth/prisma-adapter";
 import CredentialsProvider from "next-auth/providers/credentials";
 import bcrypt from "bcrypt";
 import type { NextAuthOptions } from "next-auth";
 import { getServerSession } from "next-auth";
-import prisma from "@/server/prisma";
+import { authPrisma, sharedCookieConfig } from "@hlf/auth-db";
 
 export const authOptions: NextAuthOptions = {
-  adapter: PrismaAdapter(prisma as unknown as Parameters<typeof PrismaAdapter>[0]),
   providers: [
     CredentialsProvider({
       name: "Credentials",
@@ -17,7 +15,7 @@ export const authOptions: NextAuthOptions = {
       async authorize(credentials) {
         if (!credentials?.username || !credentials?.password) return null;
 
-        const user = await prisma.user.findUnique({
+        const user = await authPrisma.user.findUnique({
           where: { username: credentials.username },
         });
 
@@ -81,6 +79,8 @@ export const authOptions: NextAuthOptions = {
   pages: {
     signIn: "/login",
   },
+
+  cookies: sharedCookieConfig(),
 
   secret: process.env.NEXTAUTH_SECRET,
 };

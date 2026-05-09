@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/server/auth/auth";
+import { authPrisma } from "@hlf/auth-db";
 import { prisma } from "@/server/prisma";
 
 export async function GET() {
@@ -9,7 +10,7 @@ export async function GET() {
     return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   }
 
-  const users = await prisma.user.findMany({
+  const users = await authPrisma.user.findMany({
     select: {
       id: true,
       firstName: true,
@@ -18,10 +19,21 @@ export async function GET() {
       username: true,
       isAdmin: true,
       createdAt: true,
-      _count: { select: { portfolios: true } },
     },
     orderBy: { createdAt: "asc" },
   });
 
-  return NextResponse.json(users);
+  const counts = await prisma.portfolio.groupBy({
+    by: ["userId"],
+    where: { userId: { in: users.map((u) => u.id) } },
+    _count: { _all: true },
+  });
+  const countByUser = new Map(counts.map((c) => [c.userId, c._count._all]));
+
+  return NextResponse.json(
+    users.map((u) => ({
+      ...u,
+      _count: { portfolios: countByUser.get(u.id) ?? 0 },
+    })),
+  );
 }

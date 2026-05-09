@@ -10,8 +10,8 @@ const { mockGetServerSession, mockUserFindUnique, mockUserFindFirst, mockUserUpd
 
 vi.mock("next-auth", () => ({ getServerSession: mockGetServerSession }));
 vi.mock("@/server/auth/auth", () => ({ authOptions: {} }));
-vi.mock("@/server/prisma", () => ({
-  prisma: {
+vi.mock("@hlf/auth-db", () => ({
+  authPrisma: {
     user: {
       findUnique: mockUserFindUnique,
       findFirst: mockUserFindFirst,

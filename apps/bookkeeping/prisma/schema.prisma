@@ -8,30 +8,14 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
-// ─── User ─────────────────────────────────────────────────────────────────────
-
-model User {
-  id                  String                @id @default(cuid())
-  firstName           String
-  lastName            String
-  email               String                @unique
-  bio                 String?
-  avatarUrl           String?
-  isAdmin             Boolean               @default(false)
-  username            String                @unique
-  password            String
-  createdAt           DateTime              @default(now())
-  bookkeepingEntries  BookkeepingEntry[]
-  bookkeepingNotes    BookkeepingMonthNote[]
-  bookkeepingSettings BookkeepingSettings?
-}
+// User identity lives in the shared auth DB (@hlf/auth-db). userId here is
+// an opaque string referencing User.id in that DB; no FK constraint.
 
 // ─── Bookkeeping ──────────────────────────────────────────────────────────────
 
 model BookkeepingEntry {
   id          String      @id @default(cuid())
   userId      String
-  user        User        @relation(fields: [userId], references: [id], onDelete: Cascade)
   type        EntryType
   name        String?
   category    String
@@ -60,7 +44,6 @@ enum EntrySource {
 model BookkeepingMonthNote {
   id        String   @id @default(cuid())
   userId    String
-  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
   yearMonth String   // "YYYY-MM"
   notes     String   @default("")
   createdAt DateTime @default(now())
@@ -72,7 +55,6 @@ model BookkeepingMonthNote {
 
 model BookkeepingSettings {
   userId            String   @id
-  user              User     @relation(fields: [userId], references: [id], onDelete: Cascade)
   // "all" or comma-separated portfolio IDs from wheel-strat-tracker
   tradingPortfolios String   @default("all")
   updatedAt         DateTime @updatedAt

@@ -4,6 +4,7 @@ import {
   internalError,
 } from "@/server/api/internal";
 import { db } from "@/server/db";
+import { authPrisma } from "@hlf/auth-db";
 
 // GET /api/internal/v1/open-positions?userId=  (HLF suite apps — shared DB)
 // GET /api/internal/v1/open-positions?email=   (hlf-wheel-alerts — separate DB, lookup by email)
@@ -23,7 +24,7 @@ export async function GET(request: Request) {
 
   let resolvedUserId = userId;
   if (!resolvedUserId && email) {
-    const user = await db.user.findUnique({ where: { email }, select: { id: true } });
+    const user = await authPrisma.user.findUnique({ where: { email }, select: { id: true } });
     if (!user) return internalResponse({ trades: [], stockLots: [] });
     resolvedUserId = user.id;
   }

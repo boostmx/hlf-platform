@@ -15,8 +15,8 @@ vi.mock("@/server/auth/password", () => ({
   hashPassword: mockHashPassword,
   verifyPassword: mockVerifyPassword,
 }));
-vi.mock("@/server/prisma", () => ({
-  prisma: {
+vi.mock("@hlf/auth-db", () => ({
+  authPrisma: {
     user: { findUnique: mockUserFindUnique, update: mockUserUpdate },
   },
 }));

@@ -8,78 +8,16 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
-// ─── NextAuth ─────────────────────────────────────────────────────────────────
-
-model Account {
-  id                String  @id @default(cuid())
-  userId            String
-  type              String
-  provider          String
-  providerAccountId String
-  refresh_token     String? @db.Text
-  access_token      String? @db.Text
-  expires_at        Int?
-  token_type        String?
-  scope             String?
-  id_token          String? @db.Text
-  session_state     String?
-  user              User    @relation(fields: [userId], references: [id], onDelete: Cascade)
-
-  @@unique([provider, providerAccountId])
-  @@index([userId])
-}
-
-model Session {
-  id           String   @id @default(cuid())
-  sessionToken String   @unique
-  userId       String
-  expires      DateTime
-  user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
-
-  @@index([userId])
-}
-
-model VerificationToken {
-  identifier String
-  token      String   @unique
-  expires    DateTime
-
-  @@unique([identifier, token])
-}
-
-// ─── User ─────────────────────────────────────────────────────────────────────
-
-model User {
-  id                String             @id @default(cuid())
-  firstName         String
-  lastName          String
-  email             String             @unique
-  bio               String?
-  avatarUrl         String?
-  isAdmin           Boolean            @default(false)
-  username          String             @unique
-  password          String
-  createdAt         DateTime           @default(now())
-  accounts              Account[]
-  sessions              Session[]
-  transactions          Transaction[]
-  recurringTransactions RecurringTransaction[]
-  categories            Category[]
-  monthlyBudgets    MonthlyBudget[]
-  netWorthSnapshots NetWorthSnapshot[]
-  investments       Investment[]
-  assets            BtAsset[]
-  liabilities       BtLiability[]
-  fireProfile       FIREProfile?
-  savingsGoals      SavingsGoal[]
-}
+// User identity lives in the shared auth DB (@hlf/auth-db). userId here is
+// an opaque string referencing User.id in that DB; no FK constraint. This
+// app uses NextAuth JWT strategy, so Account/Session/VerificationToken
+// adapter tables aren't needed.
 
 // ─── Recurring Transactions ───────────────────────────────────────────────────
 
 model RecurringTransaction {
   id          String          @id @default(cuid())
   userId      String
-  user        User            @relation(fields: [userId], references: [id], onDelete: Cascade)
   amount      Decimal         @db.Decimal(18, 2)
   type        TransactionType
   categoryId  String?
@@ -99,7 +37,6 @@ model RecurringTransaction {
 model Transaction {
   id          String          @id @default(cuid())
   userId      String
-  user        User            @relation(fields: [userId], references: [id], onDelete: Cascade)
   amount      Decimal         @db.Decimal(18, 2)
   type        TransactionType
   categoryId  String?
@@ -127,7 +64,6 @@ enum TransactionType {
 model Category {
   id             String        @id @default(cuid())
   userId         String
-  user           User          @relation(fields: [userId], references: [id], onDelete: Cascade)
   name           String
   color          String        @default("#6366f1")
   icon           String        @default("tag")
@@ -159,7 +95,6 @@ enum CategoryType {
 model MonthlyBudget {
   id           String   @id @default(cuid())
   userId       String
-  user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
   month        Int
   year         Int
   categoryId   String
@@ -177,7 +112,6 @@ model MonthlyBudget {
 model NetWorthSnapshot {
   id               String   @id @default(cuid())
   userId           String
-  user             User     @relation(fields: [userId], references: [id], onDelete: Cascade)
   date             DateTime
   totalAssets      Decimal  @db.Decimal(18, 2)
   totalLiabilities Decimal  @db.Decimal(18, 2)
@@ -193,7 +127,6 @@ model NetWorthSnapshot {
 model BtAsset {
   id        String      @id @default(cuid())
   userId    String
-  user      User        @relation(fields: [userId], references: [id], onDelete: Cascade)
   name      String
   type      BtAssetType
   value     Decimal     @db.Decimal(18, 2)
@@ -218,7 +151,6 @@ enum BtAssetType {
 model BtLiability {
   id        String          @id @default(cuid())
   userId    String
-  user      User            @relation(fields: [userId], references: [id], onDelete: Cascade)
   name      String
   type      BtLiabilityType
   balance   Decimal         @db.Decimal(18, 2)
@@ -244,7 +176,6 @@ enum BtLiabilityType {
 model Investment {
   id           String         @id @default(cuid())
   userId       String
-  user         User           @relation(fields: [userId], references: [id], onDelete: Cascade)
   name            String
   type            InvestmentType
   currentValue    Decimal        @db.Decimal(18, 2)
@@ -273,7 +204,6 @@ enum InvestmentType {
 
 model FIREProfile {
   userId                    String   @id
-  user                      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
   targetAnnualExpenses      Decimal  @db.Decimal(18, 2)
   safeWithdrawalRate        Decimal  @default(0.04) @db.Decimal(5, 4)
   targetRetirementAge       Int?
@@ -291,7 +221,6 @@ model FIREProfile {
 model SavingsGoal {
   id            String    @id @default(cuid())
   userId        String
-  user          User      @relation(fields: [userId], references: [id], onDelete: Cascade)
   name          String
   targetAmount  Decimal   @db.Decimal(18, 2)
   currentAmount Decimal   @default(0) @db.Decimal(18, 2)

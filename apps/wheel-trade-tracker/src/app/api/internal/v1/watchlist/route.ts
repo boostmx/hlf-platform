@@ -4,6 +4,7 @@ import {
   internalError,
 } from "@/server/api/internal";
 import { db } from "@/server/db";
+import { authPrisma } from "@hlf/auth-db";
 
 // GET /api/internal/v1/watchlist?email=
 // Returns watchlist tickers for a user, looked up by email.
@@ -21,7 +22,7 @@ export async function GET(request: Request) {
   }
 
   try {
-    const user = await db.user.findUnique({
+    const user = await authPrisma.user.findUnique({
       where: { email },
       select: { id: true },
     });

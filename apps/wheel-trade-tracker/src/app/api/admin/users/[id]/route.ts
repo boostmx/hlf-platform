@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/server/auth/auth";
+import { authPrisma } from "@hlf/auth-db";
 import { prisma } from "@/server/prisma";
 import bcrypt from "bcrypt";
 
@@ -24,7 +25,7 @@ export async function PATCH(
         { status: 400 },
       );
     }
-    const updated = await prisma.user.update({
+    const updated = await authPrisma.user.update({
       where: { id },
       data: { isAdmin: body.isAdmin },
       select: { id: true, isAdmin: true },
@@ -41,7 +42,7 @@ export async function PATCH(
       );
     }
     const hashed = await bcrypt.hash(body.password, 10);
-    await prisma.user.update({
+    await authPrisma.user.update({
       where: { id },
       data: { password: hashed },
     });
@@ -69,8 +70,17 @@ export async function DELETE(
     );
   }
 
-  // Cascade delete via Prisma (Portfolio → Trade/StockLot cascade defined in schema)
-  await prisma.user.delete({ where: { id } });
+  // User identity lives in the auth DB; per-user wheel data lives here. The
+  // FK constraints from Portfolio/WatchlistItem/JournalEntry to User were
+  // dropped (see 20260509000000_drop_user_fk_constraints), so we delete each
+  // tree explicitly. Trade/StockLot/CapitalTransaction still cascade via
+  // Portfolio.
+  await prisma.$transaction([
+    prisma.portfolio.deleteMany({ where: { userId: id } }),
+    prisma.watchlistItem.deleteMany({ where: { userId: id } }),
+    prisma.journalEntry.deleteMany({ where: { userId: id } }),
+  ]);
+  await authPrisma.user.delete({ where: { id } });
 
   return NextResponse.json({ ok: true });
 }

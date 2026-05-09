@@ -1,4 +1,4 @@
-import { prisma } from "@/server/prisma";
+import { authPrisma } from "@hlf/auth-db";
 import { NextResponse } from "next/server";
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/server/auth/auth";
@@ -41,7 +41,7 @@ export async function PATCH(req: Request) {
     );
   }
 
-  const user = await prisma.user.findUnique({
+  const user = await authPrisma.user.findUnique({
     where: { id: sessionUser.id },
   });
 
@@ -61,7 +61,7 @@ export async function PATCH(req: Request) {
 
   const newHash = await hashPassword(newPassword);
 
-  await prisma.user.update({
+  await authPrisma.user.update({
     where: { id: sessionUser.id },
     data: {
       // Prefer passwordHash if your schema has it; otherwise fall back to password

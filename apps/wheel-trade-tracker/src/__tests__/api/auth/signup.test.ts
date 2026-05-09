@@ -5,8 +5,8 @@ const { mockUserFindFirst, mockUserCreate } = vi.hoisted(() => ({
   mockUserCreate: vi.fn(),
 }));
 
-vi.mock("@/server/db", () => ({
-  prisma: {
+vi.mock("@hlf/auth-db", () => ({
+  authPrisma: {
     user: { findFirst: mockUserFindFirst, create: mockUserCreate },
   },
 }));
