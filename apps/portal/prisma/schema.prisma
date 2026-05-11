@@ -1,0 +1,29 @@
+// Portal has no DB of its own — all user data flows through @hlf/auth-db.
+//
+// This schema exists solely so `prisma generate` produces the Prisma query
+// engine binary at apps/portal/src/generated/prisma/. The Vercel serverless
+// runtime's fallback search uses <cwd>/src/generated/prisma/, where cwd is
+// the function's directory. authPrisma (which is generated under
+// packages/auth-db/) can't reach its original output path on Vercel, so it
+// falls back here and loads the same engine binary.
+//
+// The four other HLF apps don't need this workaround because each generates
+// its own Prisma client (for trades / entries / transactions / alerts) and
+// the binary lands in their app folder incidentally.
+//
+// Do NOT use this client in portal source. All DB access still goes through
+// `authPrisma` from @hlf/auth-db.
+
+generator client {
+  provider = "prisma-client-js"
+  output   = "../src/generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("AUTH_DATABASE_URL")
+}
+
+model PortalEngineAnchor {
+  id String @id
+}
