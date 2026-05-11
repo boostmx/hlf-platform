@@ -26,6 +26,15 @@ const fullVersion =
 const nextConfig: NextConfig = {
   reactStrictMode: true,
   env: { NEXT_PUBLIC_APP_VERSION: fullVersion },
+  // Force Next's file tracer to bundle the Prisma query engine binary from
+  // @hlf/auth-db into every serverless function. The other apps don't need
+  // this because they each generate their own Prisma client locally, so the
+  // binary lands in apps/<app>/src/generated/prisma/ and Next traces it
+  // naturally. Portal has no Prisma of its own — it only uses authPrisma —
+  // so the cross-package binary has to be pulled in explicitly.
+  outputFileTracingIncludes: {
+    "*": ["../../packages/auth-db/src/generated/prisma/**/*"],
+  },
 };
 
 export default nextConfig;
