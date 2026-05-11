@@ -5,19 +5,21 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { signOut, useSession } from "next-auth/react";
 import {
-  Bell,
   LayoutDashboard,
-  List,
-  Settings,
   LogOut,
-  Shield,
-  TrendingUp,
   Sun,
   Moon,
-  Briefcase,
   Menu,
   X,
   Sparkles,
+  LayoutGrid,
+  Settings,
+  Shield,
+  TrendingUp,
+  Wallet,
+  Target,
+  Bell,
+  ExternalLink,
   ChevronUp,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
@@ -25,27 +27,24 @@ import { Button } from "@hlf/ui/button";
 import { Popover, PopoverContent, PopoverTrigger } from "@hlf/ui/popover";
 import { useTheme } from "next-themes";
 import { getLatestVersion } from "@/data/changelog";
+import { APPS, getAppUrl, type AppDef } from "@/lib/apps";
 
-const mainNav = [
-  { href: "/dashboard", label: "Dashboard", icon: LayoutDashboard },
-  { href: "/positions", label: "Positions", icon: Briefcase },
-  { href: "/tickers", label: "Tickers", icon: TrendingUp },
-  { href: "/alerts", label: "Alerts", icon: List },
-];
+const APP_ICONS: Record<AppDef["key"], React.ElementType> = {
+  wheel: TrendingUp,
+  bookkeeping: Wallet,
+  budget: Target,
+  alerts: Bell,
+};
 
 export function AppShell({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
   const { data: session } = useSession();
-  const user = session?.user;
-  const isAdmin = Boolean(user?.isAdmin);
-  const firstName = user?.firstName ?? "";
-  const lastName = user?.lastName ?? "";
-  const username = user?.username ?? "";
-  const displayName = [firstName, lastName].filter(Boolean).join(" ") || username;
-  const initials =
-    ((firstName[0] ?? "") + (lastName[0] ?? "")).toUpperCase() ||
-    username[0]?.toUpperCase() ||
-    "?";
+  const isAdmin = Boolean(session?.user?.isAdmin);
+  const firstName = session?.user?.firstName ?? "";
+  const lastName = session?.user?.lastName ?? "";
+  const email = session?.user?.email ?? "";
+  const displayName = [firstName, lastName].filter(Boolean).join(" ") || email;
+  const initial = (firstName[0] || email[0] || "?").toUpperCase();
   const { resolvedTheme, setTheme } = useTheme();
   const [mounted, setMounted] = useState(false);
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
@@ -55,12 +54,11 @@ export function AppShell({ children }: { children: React.ReactNode }) {
     setMobileNavOpen(false);
   }, [pathname]);
 
-  const isDark = mounted && resolvedTheme === "dark";
   function toggleTheme() {
-    setTheme(isDark ? "light" : "dark");
+    setTheme(resolvedTheme === "dark" ? "light" : "dark");
   }
 
-  const navLink = (href: string, label: string, Icon: React.ElementType) => (
+  const internalLink = (href: string, label: string, Icon: React.ElementType) => (
     <Link
       key={href}
       href={href}
@@ -76,12 +74,37 @@ export function AppShell({ children }: { children: React.ReactNode }) {
     </Link>
   );
 
-  const userMenu = user?.username ? (
+  const appLink = (app: AppDef) => {
+    const Icon = APP_ICONS[app.key];
+    return (
+      <a
+        key={app.key}
+        href={getAppUrl(app)}
+        target="_blank"
+        rel="noopener noreferrer"
+        className="group flex items-center gap-2.5 px-3 py-2 rounded-md text-sm text-muted-foreground hover:bg-sidebar-accent hover:text-sidebar-accent-foreground transition-colors"
+      >
+        <span
+          className="h-5 w-5 rounded-md flex items-center justify-center shrink-0"
+          style={{ backgroundColor: app.accent }}
+        >
+          <Icon className="h-3 w-3 text-white" />
+        </span>
+        <span className="flex-1 truncate">{app.name}</span>
+        <ExternalLink className="h-3 w-3 opacity-0 group-hover:opacity-60 transition-opacity" />
+      </a>
+    );
+  };
+
+  const username = session?.user?.username ?? "";
+  const isDark = mounted && resolvedTheme === "dark";
+
+  const userMenu = (
     <Popover>
       <PopoverTrigger asChild>
         <button className="group flex items-center w-full gap-2 px-3 py-3 transition-colors hover:bg-accent/50 text-left">
-          <div className="h-7 w-7 rounded-full bg-primary text-primary-foreground grid place-items-center text-xs font-semibold shrink-0">
-            {initials}
+          <div className="h-7 w-7 rounded-full bg-primary grid place-items-center text-xs font-semibold text-primary-foreground shrink-0">
+            {initial}
           </div>
           <div className="flex-1 min-w-0">
             <p className="text-sm font-medium text-foreground truncate leading-tight">
@@ -108,16 +131,16 @@ export function AppShell({ children }: { children: React.ReactNode }) {
 
         <div className="p-1 space-y-0.5">
           <Link
-            href="/settings"
+            href="/profile"
             className={cn(
               "flex items-center gap-2.5 px-2.5 py-1.5 text-sm rounded-md transition-colors w-full",
-              pathname.startsWith("/settings")
+              pathname.startsWith("/profile")
                 ? "bg-accent text-accent-foreground"
                 : "text-foreground hover:bg-accent",
             )}
           >
             <Settings className="h-4 w-4 text-muted-foreground" />
-            Settings
+            Profile &amp; Settings
           </Link>
           {isAdmin && (
             <Link
@@ -166,12 +189,20 @@ export function AppShell({ children }: { children: React.ReactNode }) {
         </div>
       </PopoverContent>
     </Popover>
-  ) : null;
+  );
 
-  const sidebarNav = (
+  const sidebarBody = (
     <>
-      <nav className="flex-1 px-2 py-3 space-y-0.5 overflow-y-auto">
-        {mainNav.map(({ href, label, icon: Icon }) => navLink(href, label, Icon))}
+      <nav className="flex-1 px-2 py-3 space-y-3 overflow-y-auto">
+        <div className="space-y-0.5">
+          {internalLink("/dashboard", "Dashboard", LayoutDashboard)}
+        </div>
+        <div>
+          <p className="px-3 pt-2 pb-1.5 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground/70">
+            Apps
+          </p>
+          <div className="space-y-0.5">{APPS.map(appLink)}</div>
+        </div>
       </nav>
 
       <div className="border-t border-border shrink-0">{userMenu}</div>
@@ -198,17 +229,17 @@ export function AppShell({ children }: { children: React.ReactNode }) {
         <div className="px-4 py-4 border-b border-sidebar-border">
           <Link href="/dashboard" className="flex items-center gap-3">
             <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-primary/15 shrink-0">
-              <Bell className="h-4 w-4 text-primary" />
+              <LayoutGrid className="h-4 w-4 text-primary" />
             </div>
             <div>
-              <p className="font-semibold text-sm leading-tight">HLF Stock Alerts</p>
+              <p className="font-semibold text-sm leading-tight">HLF Portal</p>
               <p className="text-[10px] text-muted-foreground leading-tight mt-0.5">
-                Wheel strategy signals
+                HL Financial Strategies
               </p>
             </div>
           </Link>
         </div>
-        {sidebarNav}
+        {sidebarBody}
       </aside>
 
       <div className="flex flex-col flex-1 min-w-0">
@@ -223,9 +254,9 @@ export function AppShell({ children }: { children: React.ReactNode }) {
           </Button>
           <Link href="/dashboard" className="flex items-center gap-2 flex-1 min-w-0">
             <div className="flex h-7 w-7 items-center justify-center rounded-lg bg-primary/15 shrink-0">
-              <Bell className="h-3.5 w-3.5 text-primary" />
+              <LayoutGrid className="h-3.5 w-3.5 text-primary" />
             </div>
-            <p className="font-semibold text-sm leading-tight truncate">HLF Stock Alerts</p>
+            <p className="font-semibold text-sm leading-tight truncate">HLF Portal</p>
           </Link>
           <Button
             variant="ghost"
@@ -235,7 +266,11 @@ export function AppShell({ children }: { children: React.ReactNode }) {
             aria-label="Toggle theme"
           >
             {mounted ? (
-              isDark ? <Sun className="h-4 w-4" /> : <Moon className="h-4 w-4" />
+              resolvedTheme === "dark" ? (
+                <Sun className="h-4 w-4" />
+              ) : (
+                <Moon className="h-4 w-4" />
+              )
             ) : (
               <div className="h-4 w-4" />
             )}
@@ -251,7 +286,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
             className="absolute inset-0 bg-black/50"
             onClick={() => setMobileNavOpen(false)}
           />
-          <aside className="absolute left-0 top-0 h-full w-64 bg-sidebar border-r border-border flex flex-col">
+          <aside className="absolute left-0 top-0 h-full w-72 bg-sidebar border-r border-border flex flex-col">
             <div className="flex items-center justify-between px-4 py-4 border-b border-sidebar-border">
               <Link
                 href="/dashboard"
@@ -259,12 +294,12 @@ export function AppShell({ children }: { children: React.ReactNode }) {
                 onClick={() => setMobileNavOpen(false)}
               >
                 <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-primary/15 shrink-0">
-                  <Bell className="h-4 w-4 text-primary" />
+                  <LayoutGrid className="h-4 w-4 text-primary" />
                 </div>
                 <div>
-                  <p className="font-semibold text-sm leading-tight">HLF Stock Alerts</p>
+                  <p className="font-semibold text-sm leading-tight">HLF Portal</p>
                   <p className="text-[10px] text-muted-foreground leading-tight mt-0.5">
-                    Wheel strategy signals
+                    HL Financial Strategies
                   </p>
                 </div>
               </Link>
@@ -278,7 +313,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
                 <X className="h-4 w-4" />
               </Button>
             </div>
-            {sidebarNav}
+            {sidebarBody}
           </aside>
         </div>
       )}
