@@ -213,6 +213,9 @@ const makeOpenPremiumColumn = (): ColumnDef<Trade> => ({
   meta: { align: "right" },
 });
 
+const allocationBarColor = (pct: number) =>
+  pct >= 85 ? "bg-red-500" : pct >= 60 ? "bg-amber-500" : "bg-emerald-500";
+
 const makeAllocationColumn = (totalCapital: number): ColumnDef<Trade> => ({
   id: "allocation",
   header: "Allocation",
@@ -223,9 +226,12 @@ const makeAllocationColumn = (totalCapital: number): ColumnDef<Trade> => ({
     if (pct == null) return <span className="text-muted-foreground">—</span>;
     const capital = calcCapitalInUse(row.original);
     return (
-      <div className="text-right">
+      <div className="text-right space-y-1">
         <div className="tabular-nums font-medium">{formatCompactUSD(capital)}</div>
         <div className="text-xs tabular-nums text-muted-foreground">{pct.toFixed(1)}%</div>
+        <div className="h-1 w-16 ml-auto bg-muted rounded-full overflow-hidden">
+          <div className={`h-full rounded-full ${allocationBarColor(pct)}`} style={{ width: `${Math.min(pct, 100)}%` }} />
+        </div>
       </div>
     );
   },
@@ -568,6 +574,9 @@ export function OpenTradesTable({
                         <div className="text-xs text-muted-foreground">Allocation</div>
                         <div className="tabular-nums font-medium">{formatCompactUSD(capital)}</div>
                         <div className="text-xs tabular-nums text-muted-foreground">{pct.toFixed(1)}%</div>
+                        <div className="mt-1 h-1 w-20 bg-muted rounded-full overflow-hidden">
+                          <div className={`h-full rounded-full ${allocationBarColor(pct)}`} style={{ width: `${Math.min(pct, 100)}%` }} />
+                        </div>
                       </div>
                     );
                   })()}

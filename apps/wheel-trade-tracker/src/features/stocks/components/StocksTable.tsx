@@ -119,14 +119,19 @@ export function StocksTable({ portfolioId, totalCapital }: Props) {
                     <td className="px-2 sm:px-4 py-2 tabular-nums">{formatCurrency(basis)}</td>
                     {showAllocation && (
                       <td className="px-2 sm:px-4 py-2 text-right">
-                        {basis > 0 ? (
-                          <div>
-                            <div className="tabular-nums font-medium">{formatCompactCurrency(basis)}</div>
-                            <div className="text-xs tabular-nums text-muted-foreground">
-                              {((basis / (totalCapital as number)) * 100).toFixed(1)}%
+                        {basis > 0 ? (() => {
+                          const pct = (basis / (totalCapital as number)) * 100;
+                          const barColor = pct >= 85 ? "bg-red-500" : pct >= 60 ? "bg-amber-500" : "bg-emerald-500";
+                          return (
+                            <div className="space-y-1">
+                              <div className="tabular-nums font-medium">{formatCompactCurrency(basis)}</div>
+                              <div className="text-xs tabular-nums text-muted-foreground">{pct.toFixed(1)}%</div>
+                              <div className="h-1 w-16 ml-auto bg-muted rounded-full overflow-hidden">
+                                <div className={`h-full rounded-full ${barColor}`} style={{ width: `${Math.min(pct, 100)}%` }} />
+                              </div>
                             </div>
-                          </div>
-                        ) : (
+                          );
+                        })() : (
                           <span className="text-muted-foreground">—</span>
                         )}
                       </td>
