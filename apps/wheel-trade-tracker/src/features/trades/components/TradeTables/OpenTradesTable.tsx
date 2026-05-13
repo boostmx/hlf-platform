@@ -54,6 +54,14 @@ const formatUSD = (n: number) =>
     maximumFractionDigits: 2,
   }).format(n);
 
+const formatCompactUSD = (n: number) =>
+  new Intl.NumberFormat("en-US", {
+    style: "currency",
+    currency: "USD",
+    notation: "compact",
+    maximumFractionDigits: 2,
+  }).format(n);
+
 const isCashSecuredPut = (type?: string) => {
   if (!type) return false;
   const t = type.toLowerCase().replaceAll(/\s+/g, "");
@@ -205,6 +213,9 @@ const makeOpenPremiumColumn = (): ColumnDef<Trade> => ({
   meta: { align: "right" },
 });
 
+const allocationBarColor = (pct: number) =>
+  pct >= 85 ? "bg-red-500" : pct >= 60 ? "bg-amber-500" : "bg-emerald-500";
+
 const makeAllocationColumn = (totalCapital: number): ColumnDef<Trade> => ({
   id: "allocation",
   header: "Allocation",
@@ -212,10 +223,16 @@ const makeAllocationColumn = (totalCapital: number): ColumnDef<Trade> => ({
   accessorFn: (row) => calcAllocationPct(row, totalCapital) ?? -1,
   cell: ({ row }) => {
     const pct = calcAllocationPct(row.original, totalCapital);
-    return pct != null ? (
-      <span>{pct.toFixed(1)}%</span>
-    ) : (
-      <span className="text-muted-foreground">—</span>
+    if (pct == null) return <span className="text-muted-foreground">—</span>;
+    const capital = calcCapitalInUse(row.original);
+    return (
+      <div className="text-right space-y-1">
+        <div className="tabular-nums font-medium">{formatCompactUSD(capital)}</div>
+        <div className="text-xs tabular-nums text-muted-foreground">{pct.toFixed(1)}%</div>
+        <div className="h-1 w-16 ml-auto bg-muted rounded-full overflow-hidden">
+          <div className={`h-full rounded-full ${allocationBarColor(pct)}`} style={{ width: `${Math.min(pct, 100)}%` }} />
+        </div>
+      </div>
     );
   },
   meta: { align: "right" },
@@ -550,12 +567,18 @@ export function OpenTradesTable({
                   </div>
                   {totalCapital != null && totalCapital > 0 && (() => {
                     const pct = calcAllocationPct(t, totalCapital);
-                    return pct != null ? (
+                    if (pct == null) return null;
+                    const capital = calcCapitalInUse(t);
+                    return (
                       <div>
                         <div className="text-xs text-muted-foreground">Allocation</div>
-                        <div>{pct.toFixed(1)}%</div>
+                        <div className="tabular-nums font-medium">{formatCompactUSD(capital)}</div>
+                        <div className="text-xs tabular-nums text-muted-foreground">{pct.toFixed(1)}%</div>
+                        <div className="mt-1 h-1 w-20 bg-muted rounded-full overflow-hidden">
+                          <div className={`h-full rounded-full ${allocationBarColor(pct)}`} style={{ width: `${Math.min(pct, 100)}%` }} />
+                        </div>
                       </div>
-                    ) : null;
+                    );
                   })()}
                   {(() => {
                     const q = quotes[t.ticker];

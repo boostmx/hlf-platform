@@ -10,6 +10,7 @@ type QuoteMap = Record<string, QuoteResult>;
 
 type Props = {
   portfolioId: string;
+  totalCapital?: number;
 };
 
 function toNumber(v: string | number | null | undefined): number {
@@ -23,6 +24,15 @@ function formatCurrency(n: number): string {
   return new Intl.NumberFormat("en-US", { style: "currency", currency: "USD", minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(n);
 }
 
+function formatCompactCurrency(n: number): string {
+  return new Intl.NumberFormat("en-US", {
+    style: "currency",
+    currency: "USD",
+    notation: "compact",
+    maximumFractionDigits: 2,
+  }).format(n);
+}
+
 const fetcher = async (url: string): Promise<StocksListResponse> => {
   const res = await fetch(url, { method: "GET" });
   if (!res.ok) {
@@ -34,7 +44,8 @@ const fetcher = async (url: string): Promise<StocksListResponse> => {
 
 const quoteFetcher = (url: string) => fetch(url).then((r) => r.json()) as Promise<QuoteMap>;
 
-export function StocksTable({ portfolioId }: Props) {
+export function StocksTable({ portfolioId, totalCapital }: Props) {
+  const showAllocation = totalCapital != null && totalCapital > 0;
   const router = useRouter();
   const key = `/api/stocks?portfolioId=${encodeURIComponent(portfolioId)}&status=open`;
   const { data, error, isLoading } = useSWR<StocksListResponse>(key, fetcher);
@@ -72,6 +83,9 @@ export function StocksTable({ portfolioId }: Props) {
                 <th className="px-2 sm:px-4 py-2.5 text-[11px] font-medium text-muted-foreground uppercase tracking-wide select-none">Shares</th>
                 <th className="px-2 sm:px-4 py-2.5 text-[11px] font-medium text-muted-foreground uppercase tracking-wide select-none">Avg Cost</th>
                 <th className="px-2 sm:px-4 py-2.5 text-[11px] font-medium text-muted-foreground uppercase tracking-wide select-none">Cost Basis</th>
+                {showAllocation && (
+                  <th className="px-2 sm:px-4 py-2.5 text-[11px] font-medium text-muted-foreground uppercase tracking-wide select-none text-right">Allocation</th>
+                )}
                 <th className="px-2 sm:px-4 py-2.5 text-[11px] font-medium text-muted-foreground uppercase tracking-wide select-none text-right">Live Price</th>
                 <th className="px-2 sm:px-4 py-2.5 text-[11px] font-medium text-muted-foreground uppercase tracking-wide select-none text-right">Unr. P/L</th>
               </tr>
@@ -103,6 +117,25 @@ export function StocksTable({ portfolioId }: Props) {
                     <td className="px-2 sm:px-4 py-2">{r.shares}</td>
                     <td className="px-2 sm:px-4 py-2 tabular-nums">{formatCurrency(avg)}</td>
                     <td className="px-2 sm:px-4 py-2 tabular-nums">{formatCurrency(basis)}</td>
+                    {showAllocation && (
+                      <td className="px-2 sm:px-4 py-2 text-right">
+                        {basis > 0 ? (() => {
+                          const pct = (basis / (totalCapital as number)) * 100;
+                          const barColor = pct >= 85 ? "bg-red-500" : pct >= 60 ? "bg-amber-500" : "bg-emerald-500";
+                          return (
+                            <div className="space-y-1">
+                              <div className="tabular-nums font-medium">{formatCompactCurrency(basis)}</div>
+                              <div className="text-xs tabular-nums text-muted-foreground">{pct.toFixed(1)}%</div>
+                              <div className="h-1 w-16 ml-auto bg-muted rounded-full overflow-hidden">
+                                <div className={`h-full rounded-full ${barColor}`} style={{ width: `${Math.min(pct, 100)}%` }} />
+                              </div>
+                            </div>
+                          );
+                        })() : (
+                          <span className="text-muted-foreground">—</span>
+                        )}
+                      </td>
+                    )}
                     <td className="px-2 sm:px-4 py-2 text-right">
                       {price != null ? (
                         <div>

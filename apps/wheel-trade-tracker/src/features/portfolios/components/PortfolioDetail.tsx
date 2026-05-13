@@ -208,7 +208,7 @@ export function PortfolioDetail({ portfolio }: { portfolio: Portfolio }) {
                   Add Stock
                 </Button>
               </div>
-              <StocksTable portfolioId={portfolio.id} />
+              <StocksTable portfolioId={portfolio.id} totalCapital={currentCapital} />
             </div>
             <AddStockModal portfolioId={portfolio.id} open={addStockOpen} onOpenChange={setAddStockOpen} />
 
