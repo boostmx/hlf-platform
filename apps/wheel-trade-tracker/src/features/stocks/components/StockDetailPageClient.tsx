@@ -569,8 +569,10 @@ export default function StockDetailPageClient(props: {
         ) : null}
       </div>
 
-      {/* Cost Basis via Premiums — both CC reductions (already in avgCost)
-          and CSP premiums collected during the hold (display-only). */}
+      {/* Cost Basis via Premiums — Original Avg (tax basis) → Effective Basis
+          (mental sell-floor) with CC + CSP premium breakdown showing the
+          reduction. CC reductions are already baked into avgCost; CSP premiums
+          collected during the hold are display-only and never mutate avgCost. */}
       {coveredCalls.length > 0 || hasCspBoost ? (
         <Card className="p-5">
           <div className="flex items-center justify-between mb-4">
@@ -597,81 +599,80 @@ export default function StockDetailPageClient(props: {
               Close covered calls or sell CSPs on this ticker to see cost basis reduction here.
             </p>
           ) : (
-            <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
-              {originalAvg !== null ? (
-                <div>
-                  <div className="text-xs text-muted-foreground mb-1">Original Avg</div>
-                  <div className="text-xl font-bold tabular-nums text-muted-foreground">
-                    {moneyCompact(originalAvg)}
+            (() => {
+              // displayedOriginal = what you paid (tax basis). When CCs have
+              // already reduced avgCost, originalAvg recovers it; when no CCs
+              // have closed yet, avg itself is the original.
+              const displayedOriginal = originalAvg ?? avg;
+              const reductionPerShare = displayedOriginal - effectiveAvgCost;
+              const reductionPct =
+                displayedOriginal > 0
+                  ? (reductionPerShare / displayedOriginal) * 100
+                  : 0;
+              return (
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
+                  <div>
+                    <div className="text-xs text-muted-foreground mb-1">Original Avg</div>
+                    <div className="text-xl font-bold tabular-nums text-muted-foreground">
+                      {moneyCompact(displayedOriginal)}
+                    </div>
+                    <div className="text-xs text-muted-foreground mt-0.5">
+                      tax basis · what you paid
+                    </div>
                   </div>
-                  <div className="text-xs text-muted-foreground mt-0.5">before CC premiums</div>
-                </div>
-              ) : null}
 
-              <div>
-                <div className="text-xs text-muted-foreground mb-1">
-                  {hasCspBoost ? "Tax Basis (Avg)" : "Current Avg"}
-                </div>
-                <div className="text-xl font-bold tabular-nums text-emerald-600 dark:text-emerald-400">
-                  {moneyCompact(avg)}
-                </div>
-                {originalAvg !== null ? (
-                  <div className="text-xs text-muted-foreground mt-0.5">
-                    {((1 - avg / originalAvg) * 100).toFixed(1)}% lower
+                  <div>
+                    <div className="text-xs text-muted-foreground mb-1">Effective Basis</div>
+                    <div className="text-xl font-bold tabular-nums text-emerald-600 dark:text-emerald-400">
+                      {moneyCompact(effectiveAvgCost)}
+                    </div>
+                    {reductionPerShare > 0 ? (
+                      <div className="text-xs text-muted-foreground mt-0.5">
+                        {reductionPct.toFixed(1)}% lower · sell-floor
+                      </div>
+                    ) : (
+                      <div className="text-xs text-muted-foreground mt-0.5">sell-floor</div>
+                    )}
                   </div>
-                ) : (
-                  <div className="text-xs text-muted-foreground mt-0.5">accounting basis</div>
-                )}
-              </div>
 
-              {hasCspBoost ? (
-                <div>
-                  <div className="text-xs text-muted-foreground mb-1">Effective Basis</div>
-                  <div className="text-xl font-bold tabular-nums text-emerald-600 dark:text-emerald-400">
-                    {moneyCompact(effectiveAvgCost)}
-                  </div>
-                  <div className="text-xs text-muted-foreground mt-0.5">
-                    incl. CSP premiums captured
-                  </div>
-                </div>
-              ) : null}
+                  {totalCaptured > 0 ? (
+                    <div>
+                      <div className="text-xs text-muted-foreground mb-1">CC Premiums</div>
+                      <div className="text-xl font-bold tabular-nums text-emerald-600 dark:text-emerald-400">
+                        {money(totalCaptured)}
+                      </div>
+                      <div className="text-xs text-muted-foreground mt-0.5">
+                        -{moneyCompact(totalCaptured / shares)}/share
+                      </div>
+                    </div>
+                  ) : null}
 
-              {totalCaptured > 0 ? (
-                <div>
-                  <div className="text-xs text-muted-foreground mb-1">CC Premiums</div>
-                  <div className="text-xl font-bold tabular-nums text-emerald-600 dark:text-emerald-400">
-                    {money(totalCaptured)}
-                  </div>
-                  <div className="text-xs text-muted-foreground mt-0.5">
-                    -{moneyCompact(totalCaptured / shares)}/share applied
-                  </div>
-                </div>
-              ) : null}
+                  {hasCspBoost ? (
+                    <div>
+                      <div className="text-xs text-muted-foreground mb-1">CSP Premiums</div>
+                      <div className="text-xl font-bold tabular-nums text-emerald-600 dark:text-emerald-400">
+                        {money(cspPremiumDuringHold)}
+                      </div>
+                      <div className="text-xs text-muted-foreground mt-0.5">
+                        -{moneyCompact(cspPremiumDuringHold / shares)}/share during hold
+                      </div>
+                    </div>
+                  ) : null}
 
-              {hasCspBoost ? (
-                <div>
-                  <div className="text-xs text-muted-foreground mb-1">CSP Premiums</div>
-                  <div className="text-xl font-bold tabular-nums text-emerald-600 dark:text-emerald-400">
-                    {money(cspPremiumDuringHold)}
-                  </div>
-                  <div className="text-xs text-muted-foreground mt-0.5">
-                    -{moneyCompact(cspPremiumDuringHold / shares)}/share during hold
-                  </div>
+                  {adjAvgIfAllCapture !== null ? (
+                    <div>
+                      <div className="text-xs text-muted-foreground mb-1">If Open CCs Expire</div>
+                      <div className="text-xl font-bold tabular-nums text-emerald-600 dark:text-emerald-400">
+                        {moneyCompact(adjAvgIfAllCapture)}
+                      </div>
+                      <div className="text-xs text-muted-foreground mt-0.5">
+                        {money(pendingPremium)} pending
+                      </div>
+                    </div>
+                  ) : null}
                 </div>
-              ) : null}
-
-              {adjAvgIfAllCapture !== null ? (
-                <div>
-                  <div className="text-xs text-muted-foreground mb-1">If Open CCs Expire</div>
-                  <div className="text-xl font-bold tabular-nums text-emerald-600 dark:text-emerald-400">
-                    {moneyCompact(adjAvgIfAllCapture)}
-                  </div>
-                  <div className="text-xs text-muted-foreground mt-0.5">
-                    {money(pendingPremium)} pending
-                  </div>
-                </div>
-              ) : null}
-            </div>
+              );
+            })()
           )}
 
         </Card>
