@@ -1,0 +1,16 @@
+{
+  "$schema": "https://turborepo.dev/schema.json",
+  "extends": ["//"],
+  "tasks": {
+    "build": {
+      "env": [
+        "WHEEL_TRACKER_URL",
+        "BOOKKEEPING_URL",
+        "BUDGET_TRACKER_URL",
+        "NEXT_PUBLIC_WHEEL_TRACKER_URL",
+        "NEXT_PUBLIC_BOOKKEEPING_URL",
+        "NEXT_PUBLIC_BUDGET_TRACKER_URL"
+      ]
+    }
+  }
+}

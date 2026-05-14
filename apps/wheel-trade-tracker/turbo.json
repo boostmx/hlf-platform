@@ -1,0 +1,14 @@
+{
+  "$schema": "https://turborepo.dev/schema.json",
+  "extends": ["//"],
+  "tasks": {
+    "build": {
+      "env": [
+        "DATABASE_URL",
+        "ALPACA_API_KEY",
+        "ALPACA_SECRET_KEY",
+        "ALERTS_SCAN_SECRET"
+      ]
+    }
+  }
+}
