@@ -87,18 +87,30 @@ export async function getQuoteSnapshots(symbols: string[]): Promise<QuoteSnapsho
   const uniq = uniqUpper(symbols);
   if (uniq.length === 0) return [];
 
-  const [snapshots, ranges] = await Promise.all([
-    fetchSnapshots(uniq),
+  // Free IEX tier doesn't expose /v1beta1/stocks/snapshots. We reconstruct
+  // the snapshot from three calls that DO work:
+  //   - latest 1-min bar → freshest current price during market hours
+  //   - last 2 daily bars → today's daily high/low/volume + previous close
+  //   - cached 252 daily bars → 52-week range (6h TTL per ticker)
+  const [latestBars, dailyByTicker, ranges] = await Promise.all([
+    fetchLatestBars(uniq),
+    fetchRecentDailyBars(uniq),
     getFiftyTwoWeekRanges(uniq),
   ]);
   const marketOpen = isMarketOpenNow();
 
   return uniq.map((symbol) => {
-    const snap = snapshots[symbol];
-    if (!snap) return NULL_SNAPSHOT(symbol);
+    const latest = latestBars.get(symbol);
+    const daily = dailyByTicker.get(symbol);
+    if (!latest && !daily) return NULL_SNAPSHOT(symbol);
 
-    const price = snap.latest_trade?.p ?? snap.minute_bar?.c ?? snap.daily_bar?.c ?? null;
-    const previousClose = snap.prev_daily_bar?.c ?? null;
+    const todayBar = daily?.today ?? null;
+    const prevBar = daily?.previous ?? null;
+
+    // Prefer the latest minute-bar close for "now"; fall back to today's
+    // daily close (close of last completed day) if no minute data.
+    const price = latest?.c ?? todayBar?.c ?? prevBar?.c ?? null;
+    const previousClose = prevBar?.c ?? null;
     const change =
       price !== null && previousClose !== null ? price - previousClose : null;
     const changePct =
@@ -113,26 +125,73 @@ export async function getQuoteSnapshots(symbols: string[]): Promise<QuoteSnapsho
       changePct,
       previousClose,
       marketState: marketOpen ? "REGULAR" : "CLOSED",
-      volume: snap.daily_bar?.v ?? null,
-      dayHigh: snap.daily_bar?.h ?? null,
-      dayLow: snap.daily_bar?.l ?? null,
+      volume: todayBar?.v ?? null,
+      dayHigh: todayBar?.h ?? null,
+      dayLow: todayBar?.l ?? null,
       fiftyTwoWeekHigh: range?.high ?? null,
       fiftyTwoWeekLow: range?.low ?? null,
     };
   });
 }
 
-async function fetchSnapshots(symbols: string[]) {
+interface DailyBarSimple {
+  c: number;
+  h: number;
+  l: number;
+  v: number;
+  t: string;
+}
+
+async function fetchLatestBars(symbols: string[]): Promise<Map<string, DailyBarSimple>> {
+  const out = new Map<string, DailyBarSimple>();
   try {
-    const r = await getClient().getStocksSnapshots({
+    const r = await getClient().getStocksBarsLatest({
       symbols: symbols.join(","),
       feed: FEED,
     });
-    return r.snapshots ?? {};
+    for (const symbol of symbols) {
+      const b = r.bars?.[symbol];
+      if (b) out.set(symbol, { c: b.c, h: b.h, l: b.l, v: b.v, t: b.t });
+    }
   } catch (err) {
-    console.error("[alpaca] getStocksSnapshots failed:", err);
-    return {} as Record<string, never>;
+    console.error("[alpaca] getStocksBarsLatest failed:", err);
   }
+  return out;
+}
+
+async function fetchRecentDailyBars(
+  symbols: string[],
+): Promise<Map<string, { today: DailyBarSimple | null; previous: DailyBarSimple | null }>> {
+  const out = new Map<string, { today: DailyBarSimple | null; previous: DailyBarSimple | null }>();
+  // Pull the last ~5 calendar days of daily bars to cover weekends/holidays
+  // and still land at least 2 trading sessions for every ticker.
+  const end = new Date();
+  const start = new Date(end.getTime() - 7 * 24 * 60 * 60 * 1000);
+  try {
+    const r = await getClient().getStocksBars({
+      symbols: symbols.join(","),
+      timeframe: "1Day",
+      start: start.toISOString().slice(0, 10),
+      end: end.toISOString().slice(0, 10),
+      limit: 1000,
+      feed: FEED,
+    });
+    const bars = r.bars ?? {};
+    for (const symbol of symbols) {
+      const list = (bars[symbol] ?? []) as DailyBarSimple[];
+      if (list.length === 0) {
+        out.set(symbol, { today: null, previous: null });
+        continue;
+      }
+      const sorted = [...list].sort((a, b) => (a.t < b.t ? -1 : 1));
+      const today = sorted[sorted.length - 1] ?? null;
+      const previous = sorted.length >= 2 ? sorted[sorted.length - 2] : null;
+      out.set(symbol, { today, previous });
+    }
+  } catch (err) {
+    console.error("[alpaca] getStocksBars(1Day, recent) failed:", err);
+  }
+  return out;
 }
 
 // ─── Market clock (derived from US/Eastern time) ─────────────────────────────
