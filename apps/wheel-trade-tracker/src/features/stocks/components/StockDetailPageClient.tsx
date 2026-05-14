@@ -521,19 +521,7 @@ export default function StockDetailPageClient(props: {
       {/* Stat cards */}
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
         <LotStat label="Shares" value={String(shares)} />
-        <LotStat
-          label="Avg Cost / Share"
-          value={moneyCompact(avg)}
-          sub={hasCspBoost ? "tax basis" : undefined}
-        />
-        {hasCspBoost ? (
-          <LotStat
-            label="Effective / Share"
-            value={moneyCompact(effectiveAvgCost)}
-            sub={`incl. ${money(cspPremiumDuringHold)} in CSP premiums`}
-            tone="success"
-          />
-        ) : null}
+        <LotStat label="Avg Cost / Share" value={moneyCompact(avg)} />
         <LotStat label="Total Cost Basis" value={money(basis)} />
         <LotStat
           label={
@@ -581,28 +569,32 @@ export default function StockDetailPageClient(props: {
         ) : null}
       </div>
 
-      {/* CC Cost-Basis Summary */}
-      {coveredCalls.length > 0 ? (
+      {/* Cost Basis via Premiums — both CC reductions (already in avgCost)
+          and CSP premiums collected during the hold (display-only). */}
+      {coveredCalls.length > 0 || hasCspBoost ? (
         <Card className="p-5">
           <div className="flex items-center justify-between mb-4">
             <div>
               <h2 className="text-sm font-semibold text-muted-foreground uppercase tracking-wide">
-                Cost Basis via Covered Calls
+                Cost Basis via Premiums
               </h2>
               <div className="text-xs text-muted-foreground mt-0.5">
                 Opened {new Date(s.openedAt).toLocaleDateString()}
               </div>
             </div>
-            {closedCount > 0 ? (
-              <span className="text-xs text-muted-foreground">
-                {closedCount} CC{closedCount !== 1 ? "s" : ""} closed
-              </span>
-            ) : null}
+            <div className="flex items-center gap-3 text-xs text-muted-foreground">
+              {closedCount > 0 ? (
+                <span>{closedCount} CC{closedCount !== 1 ? "s" : ""} closed</span>
+              ) : null}
+              {hasCspBoost ? (
+                <span>{money(cspPremiumDuringHold)} CSP captured</span>
+              ) : null}
+            </div>
           </div>
 
-          {totalCaptured === 0 && adjAvgIfAllCapture === null ? (
+          {totalCaptured === 0 && adjAvgIfAllCapture === null && !hasCspBoost ? (
             <p className="text-sm text-muted-foreground">
-              Close covered calls to see cost basis reduction here.
+              Close covered calls or sell CSPs on this ticker to see cost basis reduction here.
             </p>
           ) : (
             <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
@@ -612,12 +604,14 @@ export default function StockDetailPageClient(props: {
                   <div className="text-xl font-bold tabular-nums text-muted-foreground">
                     {moneyCompact(originalAvg)}
                   </div>
-                  <div className="text-xs text-muted-foreground mt-0.5">before premiums</div>
+                  <div className="text-xs text-muted-foreground mt-0.5">before CC premiums</div>
                 </div>
               ) : null}
 
               <div>
-                <div className="text-xs text-muted-foreground mb-1">Current Avg</div>
+                <div className="text-xs text-muted-foreground mb-1">
+                  {hasCspBoost ? "Tax Basis (Avg)" : "Current Avg"}
+                </div>
                 <div className="text-xl font-bold tabular-nums text-emerald-600 dark:text-emerald-400">
                   {moneyCompact(avg)}
                 </div>
@@ -625,17 +619,43 @@ export default function StockDetailPageClient(props: {
                   <div className="text-xs text-muted-foreground mt-0.5">
                     {((1 - avg / originalAvg) * 100).toFixed(1)}% lower
                   </div>
-                ) : null}
+                ) : (
+                  <div className="text-xs text-muted-foreground mt-0.5">accounting basis</div>
+                )}
               </div>
+
+              {hasCspBoost ? (
+                <div>
+                  <div className="text-xs text-muted-foreground mb-1">Effective Basis</div>
+                  <div className="text-xl font-bold tabular-nums text-emerald-600 dark:text-emerald-400">
+                    {moneyCompact(effectiveAvgCost)}
+                  </div>
+                  <div className="text-xs text-muted-foreground mt-0.5">
+                    incl. CSP premiums captured
+                  </div>
+                </div>
+              ) : null}
 
               {totalCaptured > 0 ? (
                 <div>
-                  <div className="text-xs text-muted-foreground mb-1">Total Captured</div>
+                  <div className="text-xs text-muted-foreground mb-1">CC Premiums</div>
                   <div className="text-xl font-bold tabular-nums text-emerald-600 dark:text-emerald-400">
                     {money(totalCaptured)}
                   </div>
                   <div className="text-xs text-muted-foreground mt-0.5">
-                    -{moneyCompact(totalCaptured / shares)}/share
+                    -{moneyCompact(totalCaptured / shares)}/share applied
+                  </div>
+                </div>
+              ) : null}
+
+              {hasCspBoost ? (
+                <div>
+                  <div className="text-xs text-muted-foreground mb-1">CSP Premiums</div>
+                  <div className="text-xl font-bold tabular-nums text-emerald-600 dark:text-emerald-400">
+                    {money(cspPremiumDuringHold)}
+                  </div>
+                  <div className="text-xs text-muted-foreground mt-0.5">
+                    -{moneyCompact(cspPremiumDuringHold / shares)}/share during hold
                   </div>
                 </div>
               ) : null}
