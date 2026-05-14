@@ -18,7 +18,6 @@ import {
   TrendingUp,
   Wallet,
   Target,
-  Bell,
   ExternalLink,
   ChevronUp,
 } from "lucide-react";
@@ -33,7 +32,6 @@ const APP_ICONS: Record<AppDef["key"], React.ElementType> = {
   wheel: TrendingUp,
   bookkeeping: Wallet,
   budget: Target,
-  alerts: Bell,
 };
 
 export function AppShell({ children }: { children: React.ReactNode }) {

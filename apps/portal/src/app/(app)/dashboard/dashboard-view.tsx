@@ -4,7 +4,6 @@ import {
   TrendingUp,
   Wallet,
   Target,
-  Bell,
   Briefcase,
   Banknote,
   PiggyBank,
@@ -16,7 +15,6 @@ import { Badge } from "@hlf/ui/badge";
 import { APPS, getAppUrl } from "@/lib/apps";
 import { formatCurrency, formatPercent } from "@/lib/utils";
 import type {
-  AlertsSummary,
   BookkeepingSummary,
   BudgetSummary,
   WheelSummary,
@@ -26,7 +24,6 @@ const APP_ICON = {
   wheel: TrendingUp,
   bookkeeping: Wallet,
   budget: Target,
-  alerts: Bell,
 } as const;
 
 type Props = {
@@ -34,16 +31,14 @@ type Props = {
   wheel: WheelSummary | null;
   bookkeeping: BookkeepingSummary | null;
   budget: BudgetSummary | null;
-  alerts: AlertsSummary | null;
   errors: {
     wheel?: string;
     bookkeeping?: string;
     budget?: string;
-    alerts?: string;
   };
 };
 
-export function DashboardView({ firstName, wheel, bookkeeping, budget, alerts, errors }: Props) {
+export function DashboardView({ firstName, wheel, bookkeeping, budget, errors }: Props) {
   const greeting = firstName ? `Welcome back, ${firstName}` : "Welcome back";
 
   return (
@@ -151,36 +146,36 @@ export function DashboardView({ firstName, wheel, bookkeeping, budget, alerts, e
               <Inbox className="w-4 h-4 text-primary" />
               Recent alerts
             </CardTitle>
-            {alerts && (
+            {wheel && (
               <Badge variant="secondary" className="font-mono text-[10px]">
-                {alerts.alertsToday} today · {alerts.alertsThisWeek} this week
+                {wheel.alertsToday} today · {wheel.alertsThisWeek} this week
               </Badge>
             )}
           </CardHeader>
           <CardContent>
-            {alerts == null && (
+            {wheel == null && (
               <p className="text-sm text-muted-foreground py-8 text-center">
-                {errors.alerts ?? "Loading alerts…"}
+                {errors.wheel ?? "Loading alerts…"}
               </p>
             )}
-            {alerts && alerts.recentAlerts.length === 0 && (
+            {wheel && wheel.recentAlerts.length === 0 && (
               <p className="text-sm text-muted-foreground py-8 text-center">
-                No recent alerts. Stock Alerts will fire when signals trigger.
+                No recent alerts. Triggers fire from Wheel Tracker when your thresholds cross.
               </p>
             )}
-            {alerts && alerts.recentAlerts.length > 0 && (
+            {wheel && wheel.recentAlerts.length > 0 && (
               <ul className="divide-y divide-border -mt-1">
-                {alerts.recentAlerts.map((a) => (
-                  <li key={a.id} className="py-2.5 flex items-start gap-3">
-                    <div className="font-mono text-xs font-semibold w-12 shrink-0 mt-0.5">
-                      {a.ticker}
+                {wheel.recentAlerts.map((a) => (
+                  <li key={a.id} className="py-2.5">
+                    <div className="flex items-center gap-2 mb-0.5">
+                      <Badge variant="outline" className="text-[10px] font-normal px-1.5 py-0">
+                        {formatAlertType(a.type)}
+                      </Badge>
+                      <span className="text-[11px] text-muted-foreground">
+                        {formatRelativeTime(a.firedAt)}
+                      </span>
                     </div>
-                    <div className="flex-1 min-w-0">
-                      <p className="text-sm leading-snug truncate">{a.message}</p>
-                      <p className="text-[11px] text-muted-foreground mt-0.5">
-                        {formatAlertType(a.type)} · {formatRelativeTime(a.sentAt)}
-                      </p>
-                    </div>
+                    <p className="text-sm leading-snug">{a.message}</p>
                   </li>
                 ))}
               </ul>

@@ -1,10 +1,13 @@
-// The four HLF apps that the portal links to. URL is resolved at module load
+// The three HLF apps that the portal links to. URL is resolved at module load
 // using literal `process.env.NEXT_PUBLIC_*` access so Next.js inlines the value
 // into the client bundle. Dynamic bracket access (process.env[someVar]) is NOT
 // inlined and produces SSR/CSR hydration mismatches.
+//
+// The standalone Stock Alerts app was retired 2026-05-13; alerts now live
+// inside Wheel Tracker at /alerts.
 
 export type AppDef = {
-  key: "wheel" | "bookkeeping" | "budget" | "alerts";
+  key: "wheel" | "bookkeeping" | "budget";
   name: string;
   description: string;
   url: string;
@@ -15,7 +18,7 @@ export const APPS: AppDef[] = [
   {
     key: "wheel",
     name: "Wheel Tracker",
-    description: "Options wheel — trades, lots, P&L",
+    description: "Options wheel — trades, lots, P&L, alerts",
     url:
       process.env.NEXT_PUBLIC_WHEEL_TRACKER_URL ||
       "https://wheel.hlfinancialstrategies.com",
@@ -38,15 +41,6 @@ export const APPS: AppDef[] = [
       process.env.NEXT_PUBLIC_BUDGET_TRACKER_URL ||
       "https://budget.hlfinancialstrategies.com",
     accent: "oklch(0.48 0.18 195)",
-  },
-  {
-    key: "alerts",
-    name: "Stock Alerts",
-    description: "Daily signals and exit alerts",
-    url:
-      process.env.NEXT_PUBLIC_STOCK_ALERTS_URL ||
-      "https://alerts.hlfinancialstrategies.com",
-    accent: "oklch(0.52 0.24 290)",
   },
 ];
 

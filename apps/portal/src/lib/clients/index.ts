@@ -1,14 +1,9 @@
 // Server-side clients for each HLF app's /api/internal/v1/portal-summary endpoint.
-// All four apps live behind the same INTERNAL_API_KEY bearer token. Each
-// fetcher is fire-and-forget — on error it returns null so the portal can
-// still render the rest of the dashboard.
+// All apps live behind the same INTERNAL_API_KEY bearer token. Each fetcher
+// is fire-and-forget — on error it returns null so the portal can still
+// render the rest of the dashboard.
 
-import type {
-  AlertsSummary,
-  BookkeepingSummary,
-  BudgetSummary,
-  WheelSummary,
-} from "./types";
+import type { BookkeepingSummary, BudgetSummary, WheelSummary } from "./types";
 
 function bearerHeaders() {
   return { Authorization: `Bearer ${process.env.INTERNAL_API_KEY ?? ""}` };
@@ -56,8 +51,4 @@ export function fetchBookkeepingSummary(email: string) {
 
 export function fetchBudgetSummary(email: string) {
   return fetchSummary<BudgetSummary>("BUDGET_TRACKER_URL", "budget-tracker", email);
-}
-
-export function fetchAlertsSummary(email: string) {
-  return fetchSummary<AlertsSummary>("STOCK_ALERTS_URL", "stock-alerts", email);
 }
