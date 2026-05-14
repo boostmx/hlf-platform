@@ -5,6 +5,7 @@ import { SessionProvider, useSession } from "next-auth/react";
 import { SWRConfig } from "swr";
 import { AppSidebar, MobileTopBar } from "@/components/layout/AppSidebar";
 import { ImpersonationBanner } from "@/features/admin/components/ImpersonationBanner";
+import { AlertToastsListener } from "@/features/alerts/components/AlertToastsListener";
 
 function InnerShell({ children }: { children: React.ReactNode }) {
   const { data: session } = useSession();
@@ -22,6 +23,7 @@ function InnerShell({ children }: { children: React.ReactNode }) {
     >
       {showChrome ? (
         <div className="flex h-[100dvh] overflow-hidden">
+          <AlertToastsListener />
           {/* Desktop sidebar */}
           <AppSidebar />
           {/* Content column */}

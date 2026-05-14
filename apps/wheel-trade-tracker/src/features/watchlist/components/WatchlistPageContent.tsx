@@ -16,6 +16,7 @@ import { cn } from "@/lib/utils";
 import type { WatchlistResponse, WatchlistPosition } from "@/app/api/watchlist/route";
 import type { QuoteResult } from "@/app/api/quotes/route";
 import type { ChartsResponse } from "@/app/api/charts/route";
+import { WatchlistAlertButton } from "@/features/alerts/components/WatchlistAlertButton";
 
 const fetcher = (url: string) => fetch(url).then((r) => r.json());
 
@@ -456,9 +457,12 @@ function DraggableWatchlistRow({
         </div>
       </td>
       <td className="px-4 py-3">
-        <button onClick={() => onRemove(ticker)} className="text-muted-foreground hover:text-destructive transition-colors" title={`Remove ${ticker}`}>
-          <X className="h-3.5 w-3.5" />
-        </button>
+        <div className="flex items-center gap-3 justify-end">
+          <WatchlistAlertButton ticker={ticker} currentPrice={quote?.price ?? null} />
+          <button onClick={() => onRemove(ticker)} className="text-muted-foreground hover:text-destructive transition-colors" title={`Remove ${ticker}`}>
+            <X className="h-3.5 w-3.5" />
+          </button>
+        </div>
       </td>
     </Reorder.Item>
   );

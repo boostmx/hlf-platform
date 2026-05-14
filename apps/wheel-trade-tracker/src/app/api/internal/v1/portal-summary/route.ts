@@ -8,7 +8,8 @@ import { authPrisma } from "@hlf/auth-db";
 
 // GET /api/internal/v1/portal-summary?email=  (or ?userId=)
 // Shaped for the HLF Portal dashboard — small response, single round-trip.
-// Returns: open trade/lot counts and MTD/YTD realized P&L (trades + stock lots).
+// Returns: open trade/lot counts, MTD/YTD realized P&L (trades + stock lots),
+// and alerts data (now sourced from the alerts module merged in 2026-05-13).
 export async function GET(request: Request) {
   if (!validateInternalApiKey(request)) {
     return internalError("Unauthorized", 401);
@@ -34,6 +35,9 @@ export async function GET(request: Request) {
         openLotCount: 0,
         mtdRealizedPnl: 0,
         ytdRealizedPnl: 0,
+        alertsToday: 0,
+        alertsThisWeek: 0,
+        recentAlerts: [],
       });
     }
     resolvedUserId = user.id;
@@ -42,11 +46,22 @@ export async function GET(request: Request) {
   const now = new Date();
   const mtdStart = new Date(now.getFullYear(), now.getMonth(), 1);
   const ytdStart = new Date(now.getFullYear(), 0, 1);
+  const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  const weekStart = new Date(todayStart);
+  weekStart.setDate(weekStart.getDate() - 7);
 
   const portfolioFilter = { userId: resolvedUserId! };
 
   try {
-    const [openTradeCount, openLotCount, ytdTrades, ytdLots] = await Promise.all([
+    const [
+      openTradeCount,
+      openLotCount,
+      ytdTrades,
+      ytdLots,
+      alertsToday,
+      alertsThisWeek,
+      recentAlerts,
+    ] = await Promise.all([
       db.trade.count({
         where: { status: "open", portfolio: portfolioFilter },
       }),
@@ -68,6 +83,25 @@ export async function GET(request: Request) {
           closedAt: { gte: ytdStart },
         },
         select: { closedAt: true, realizedPnl: true },
+      }),
+      db.alertEvent.count({
+        where: { userId: resolvedUserId!, firedAt: { gte: todayStart } },
+      }),
+      db.alertEvent.count({
+        where: { userId: resolvedUserId!, firedAt: { gte: weekStart } },
+      }),
+      db.alertEvent.findMany({
+        where: { userId: resolvedUserId! },
+        orderBy: { firedAt: "desc" },
+        take: 10,
+        select: {
+          id: true,
+          message: true,
+          firedAt: true,
+          config: {
+            select: { type: true, tradeId: true, watchlistTicker: true },
+          },
+        },
       }),
     ]);
 
@@ -91,6 +125,16 @@ export async function GET(request: Request) {
       openLotCount,
       mtdRealizedPnl,
       ytdRealizedPnl,
+      alertsToday,
+      alertsThisWeek,
+      recentAlerts: recentAlerts.map((a) => ({
+        id: a.id,
+        message: a.message,
+        firedAt: a.firedAt.toISOString(),
+        type: a.config.type,
+        tradeId: a.config.tradeId,
+        watchlistTicker: a.config.watchlistTicker,
+      })),
     });
   } catch (error) {
     console.error("[internal/portal-summary] error:", error);
