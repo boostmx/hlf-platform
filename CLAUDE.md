@@ -9,12 +9,12 @@ HLF suite monorepo. Consolidates all HLF apps and shared infrastructure packages
 ```
 apps/
   portal/                Signed-in landing page — cross-app KPI dashboard + profile + admin
-  wheel-strat-tracker/   Options wheel strategy tracker (hub — data source for suite)
+  wheel-strat-tracker/   Options wheel strategy tracker (hub — owns the alerts module since 2026-05-13)
   hlf-bookkeeping/       Finance & trading P&L bookkeeping
   hlf-budgettracker/     Monthly budget tracker + FIRE dashboard
-  stock-alerts/          Stock ticker alert system (own DB; daily cron at 5pm ET Mon–Fri)
   hlf-website/           Marketing site (static)
   hungvnguyen-site/      Personal portfolio (static)
+  # stock-alerts/        Retired 2026-05-13 — alerts rebuilt from scratch inside wheel-strat-tracker
 
 packages/
   auth-db/               Shared User Prisma schema + PrismaClient for auth DB
@@ -29,11 +29,12 @@ packages/
 
 | App | Port | Brand | DB |
 |---|---|---|---|
-| `wheel-strat-tracker` | 3000 | Emerald | `ballast` Railway |
+| `wheel-strat-tracker` | 3000 | Emerald | `ballast` Railway (also hosts alerts module tables since 2026-05-13) |
 | `hlf-bookkeeping` | 3001 | Indigo | `turntable:21201` Railway |
 | `hlf-budgettracker` | 3002 | Teal | `shuttle` Railway |
-| `stock-alerts` | 3003 | Violet | own Railway (set `DATABASE_URL`) |
 | `portal` | 3004 | HLF green | no DB — reads from `@hlf/auth-db` + cross-app internal APIs |
+
+`stock-alerts` (port 3003) retired 2026-05-13 — alerts now live inside wheel-strat-tracker at `/alerts/*` with Web Push + GitHub Actions cron.
 
 ---
 
@@ -82,9 +83,12 @@ All apps' internal APIs are guarded by the same `INTERNAL_API_KEY` bearer.
 | `GET /portal-summary?email=` | portal |
 | `GET /trading-summary?userId=&from=&to=` | hlf-bookkeeping |
 
-**hlf-bookkeeping**, **hlf-budgettracker**, **stock-alerts** each expose
-`GET /api/internal/v1/portal-summary?email=` — consumed by the portal dashboard
-to render the KPI strip and alerts inbox.
+**hlf-bookkeeping** and **hlf-budgettracker** each expose
+`GET /api/internal/v1/portal-summary?email=` — consumed by the portal dashboard.
+
+The alerts inbox is now part of **wheel-strat-tracker**'s portal-summary
+response (`alertsToday`, `alertsThisWeek`, `recentAlerts`) — one fewer
+cross-app call since the 2026-05-13 alerts rebuild.
 
 ## Auth — sign-in identifier
 
@@ -104,13 +108,11 @@ in `@hlf/auth-db` either way.
 | `NEXTAUTH_SECRET` | All HLF apps | **Must be identical** for cross-app JWT validity |
 | `NEXTAUTH_URL` | All HLF apps | Drives `sharedCookieConfig()` — must start with `https://` in prod for SSO cookie to be issued |
 | `INTERNAL_API_KEY` | wheel-tracker + consumers | Bearer token for internal API |
-| `WHEEL_TRACKER_URL` | bookkeeping, stock-alerts, portal | Base URL for internal API calls |
-| `BOOKKEEPING_URL` / `BUDGET_TRACKER_URL` / `STOCK_ALERTS_URL` | portal | Server-side base URLs for `portal-summary` calls |
-| `NEXT_PUBLIC_*_URL` (same four) | portal | Client-side launcher links — must be literal `process.env.NEXT_PUBLIC_*` access |
-| `ALPACA_API_KEY` / `ALPACA_SECRET_KEY` | stock-alerts | Alpaca market data |
-| `ANTHROPIC_API_KEY` | stock-alerts | Claude Haiku for alert messages (optional) |
-| `RESEND_API_KEY` / `RESEND_FROM_EMAIL` | stock-alerts | Email delivery |
-| `CRON_SECRET` | stock-alerts | Bearer token Vercel cron sends to `/api/cron/daily` |
+| `WHEEL_TRACKER_URL` | bookkeeping, portal | Base URL for internal API calls |
+| `BOOKKEEPING_URL` / `BUDGET_TRACKER_URL` | portal | Server-side base URLs for `portal-summary` calls |
+| `NEXT_PUBLIC_*_URL` (wheel/bookkeeping/budget) | portal | Client-side launcher links — must be literal `process.env.NEXT_PUBLIC_*` access |
+| `ALPACA_API_KEY` / `ALPACA_SECRET_KEY` | wheel-tracker (alerts module) | Alpaca market data for the realtime scan |
+| `ALERTS_SCAN_SECRET` | wheel-tracker (alerts module) | Bearer token GitHub Actions sends to `/api/alerts/scan` |
 
 ---
 
@@ -130,11 +132,11 @@ pnpm --filter @hlf/auth-db db:generate         # regenerate auth Prisma client
 
 Apps moved into the monorepo:
 
-- [x] `wheel-strat-tracker` — in monorepo, on shared auth DB (v2.15.0)
+- [x] `wheel-strat-tracker` — in monorepo, on shared auth DB. Owns the realtime alerts module since 2026-05-13: `/alerts/*` pages, `/api/alerts/*` routes, `/api/alerts/scan` cron endpoint (triggered by GitHub Actions every 2 min during market hours), **in-app toast delivery** via a polling listener mounted in AppShell + tab-title flash for backgrounded windows. Web Push was tried and dropped — see `docs/alerts-module-setup.md`. Inline AlertConfig UI on trade detail + watchlist rows; full configs management + history at `/alerts`.
 - [x] `hlf-bookkeeping` — in monorepo, on shared auth DB (v1.3.0)
 - [x] `hlf-budgettracker` — in monorepo, on shared auth DB (v1.1.0)
-- [x] `stock-alerts` — in monorepo, on shared auth DB (v2.1.0); daily cron live (`/api/cron/daily` at 5pm ET Mon–Fri) with the three fixes (createMany batching, pre-loaded dedup Set, no pg.Pool); intraday position cron deferred to a separate free-tier service later
-- [x] `portal` — in monorepo, deployed at `portal.hlfinancialstrategies.com`. Dashboard with launcher + KPI strip + alerts inbox; profile editor + admin user manager backed by `@hlf/auth-db`
+- [x] `stock-alerts` (retired) — deleted from monorepo 2026-05-13. Replaced by the new realtime alerts module inside wheel-strat-tracker. `alerts.hlfinancialstrategies.com` subdomain + its Vercel project + its standalone Railway DB to be retired.
+- [x] `portal` — in monorepo, deployed at `portal.hlfinancialstrategies.com`. Dashboard launcher + KPI strip + alerts inbox (now reads alerts data from wheel-tracker's portal-summary); profile editor + admin user manager backed by `@hlf/auth-db`.
 - [ ] `hlf-website` — not yet moved
 - [ ] `hungvnguyen-site` — not yet moved
 - [x] `packages/auth-db` — auth DB live (`nozomi.proxy.rlwy.net:14507`); all 4 HLF apps consume it

@@ -18,6 +18,7 @@ import {
 import CloseTradeModal from "@/features/trades/components/CloseTradeModal";
 import AddToTradeModal from "@/features/trades/components/AddToTradeModal";
 import { AdminEditTradeModal } from "@/features/trades/components/AdminEditTradeModal";
+import { TradeAlertsCard } from "@/features/alerts/components/TradeAlertsCard";
 import { formatDateOnlyUTC, ensureUtcMidnight } from "@/lib/formatDateOnly";
 
 type Props = { portfolioId: string; tradeId: string };
@@ -482,6 +483,9 @@ export default function TradeDetailPageClient({ portfolioId, tradeId }: Props) {
           onEditingChange={setNotesEditing}
         />
       </Card>
+
+      {/* Alerts card — Web Push triggers for this trade */}
+      {trade.status === "open" && <TradeAlertsCard tradeId={trade.id} />}
 
       {/* Modals */}
       {isAdmin && trade && (

@@ -12,6 +12,7 @@ import {
   Shield,
   Eye,
   BookOpen,
+  Bell,
   LogOut,
   Moon,
   Sun,
@@ -375,6 +376,14 @@ function NavContent({
           icon={Eye}
           label="Watchlist"
           active={pathname === "/watchlist"}
+          onClick={onNavigate}
+          collapsed={collapsed}
+        />
+        <NavItem
+          href="/alerts"
+          icon={Bell}
+          label="Alerts"
+          active={pathname === "/alerts" || pathname.startsWith("/alerts/")}
           onClick={onNavigate}
           collapsed={collapsed}
         />
