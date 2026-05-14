@@ -29,6 +29,7 @@ type StockResponse = {
   stockLot: StockLot;
   effectiveBasis?: {
     cspPremiumDuringHold: number;
+    cspPendingPremium: number;
     effectiveAvgCost: number;
   };
 };
@@ -373,6 +374,7 @@ export default function StockDetailPageClient(props: {
   const shares = safeNumber(stockLot?.shares ?? 0);
   const avg = toNumber(stockLot?.avgCost ?? 0);
   const cspPremiumDuringHold = data?.effectiveBasis?.cspPremiumDuringHold ?? 0;
+  const cspPendingPremium = data?.effectiveBasis?.cspPendingPremium ?? 0;
   const effectiveAvgCost = data?.effectiveBasis?.effectiveAvgCost ?? avg;
   const hasCspBoost = cspPremiumDuringHold > 0 && shares > 0;
 
@@ -449,8 +451,14 @@ export default function StockDetailPageClient(props: {
   const { totalCaptured, pendingPremium, closedCount } = ccMetrics;
   const originalAvg =
     totalCaptured > 0 ? avg + totalCaptured / shares : null;
+  // Combined "if all open premiums get captured" projection: sums pending CC
+  // premium (open CCs against this lot) and pending CSP premium (open CSPs on
+  // the same ticker/portfolio). One forward-looking sell-floor instead of two.
+  const totalPendingPremium = pendingPremium + cspPendingPremium;
   const adjAvgIfAllCapture =
-    pendingPremium > 0 ? avg - pendingPremium / shares : null;
+    totalPendingPremium > 0 && shares > 0
+      ? Math.max(0, effectiveAvgCost - totalPendingPremium / shares)
+      : null;
 
   const isClosed = String(s.status).toUpperCase() === "CLOSED";
   const realizedPnl = safeNumber(s.realizedPnl);
@@ -573,7 +581,7 @@ export default function StockDetailPageClient(props: {
           (mental sell-floor) with CC + CSP premium breakdown showing the
           reduction. CC reductions are already baked into avgCost; CSP premiums
           collected during the hold are display-only and never mutate avgCost. */}
-      {coveredCalls.length > 0 || hasCspBoost ? (
+      {coveredCalls.length > 0 || hasCspBoost || cspPendingPremium > 0 ? (
         <Card className="p-5">
           <div className="flex items-center justify-between mb-4">
             <div>
@@ -661,12 +669,19 @@ export default function StockDetailPageClient(props: {
 
                   {adjAvgIfAllCapture !== null ? (
                     <div>
-                      <div className="text-xs text-muted-foreground mb-1">If Open CCs Expire</div>
+                      <div className="text-xs text-muted-foreground mb-1">
+                        If All Open Expire
+                      </div>
                       <div className="text-xl font-bold tabular-nums text-emerald-600 dark:text-emerald-400">
                         {moneyCompact(adjAvgIfAllCapture)}
                       </div>
                       <div className="text-xs text-muted-foreground mt-0.5">
-                        {money(pendingPremium)} pending
+                        {money(totalPendingPremium)} pending
+                        {pendingPremium > 0 && cspPendingPremium > 0
+                          ? ` (${money(pendingPremium)} CC + ${money(cspPendingPremium)} CSP)`
+                          : pendingPremium > 0
+                            ? " (CC)"
+                            : " (CSP)"}
                       </div>
                     </div>
                   ) : null}
