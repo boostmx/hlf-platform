@@ -6,6 +6,26 @@ export interface ChangelogEntry {
 
 export const changelog: ChangelogEntry[] = [
   {
+    date: "2026-05-14",
+    version: "v2.17.0",
+    highlights: [
+      "All market data now comes from Alpaca — watchlist quotes, sparkline charts, and the alerts engine share one provider instead of mixing Alpaca and Yahoo Finance. One fewer external dependency and more consistent realtime data during market hours.",
+      "52-week range still appears on the watchlist; computed from the last ~year of daily bars and cached for 6 hours per ticker.",
+    ],
+  },
+  {
+    date: "2026-05-13",
+    version: "v2.16.0",
+    highlights: [
+      "Realtime alerts module — the standalone stock-alerts app has been retired and rebuilt inside Wheel Tracker. New /alerts page with active triggers management (toggle, delete, jump to target) plus full alert history.",
+      "Configure per-trade alerts inline on the trade detail page — Profit Target, Assignment Risk, and Roll Opportunity with custom thresholds. Each open trade can have multiple alerts.",
+      "Configure per-watchlist alerts inline via the bell icon on each row — Price Breach above or below a target.",
+      "In-app sonner toasts deliver alerts within ~15 s of firing; tab title flashes with an unread counter when the window isn't focused. No Web Push, no service worker, no permission prompts.",
+      "Driven by a GitHub Actions cron every 2 min during US market hours; Alpaca latest-quote feeds the threshold evaluator with a 30-minute per-config dedup window.",
+      "Polished number inputs across all alert forms — no browser spinner arrows, numeric keypad on mobile, scroll-safe.",
+    ],
+  },
+  {
     date: "2026-05-09",
     version: "v2.15.0",
     highlights: [

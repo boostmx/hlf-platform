@@ -1,6 +1,5 @@
 import { auth } from "@/server/auth/auth";
 import {
-  fetchAlertsSummary,
   fetchBookkeepingSummary,
   fetchBudgetSummary,
   fetchWheelSummary,
@@ -14,11 +13,10 @@ export default async function DashboardPage() {
   const email = session?.user?.email ?? "";
   const firstName = session?.user?.firstName ?? "";
 
-  const [wheel, bookkeeping, budget, alerts] = await Promise.all([
+  const [wheel, bookkeeping, budget] = await Promise.all([
     fetchWheelSummary(email),
     fetchBookkeepingSummary(email),
     fetchBudgetSummary(email),
-    fetchAlertsSummary(email),
   ]);
 
   return (
@@ -27,12 +25,10 @@ export default async function DashboardPage() {
       wheel={wheel.data}
       bookkeeping={bookkeeping.data}
       budget={budget.data}
-      alerts={alerts.data}
       errors={{
         wheel: wheel.error,
         bookkeeping: bookkeeping.error,
         budget: budget.error,
-        alerts: alerts.error,
       }}
     />
   );

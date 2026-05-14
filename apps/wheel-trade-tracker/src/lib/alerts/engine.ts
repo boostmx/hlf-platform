@@ -1,5 +1,5 @@
 import prisma from "@/server/prisma";
-import { getLatestQuotes } from "./alpaca";
+import { getLatestQuotes } from "@/lib/alpaca";
 import {
   paramsByType,
   type AssignmentRiskParams,
