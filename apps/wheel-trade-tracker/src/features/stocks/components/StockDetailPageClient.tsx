@@ -17,12 +17,22 @@ import {
 import type { StockLot } from "@/types";
 import type { QuoteResult } from "@/app/api/quotes/route";
 import { CloseStockLotModal } from "./CloseStockModal";
+import { AddSharesModal } from "./AddSharesModal";
 import { AddTradeModal } from "@/features/trades/components/AddTradeModal";
 import { AdminEditStockModal } from "./AdminEditStockModal";
-import { ChevronRight, Shield } from "lucide-react";
+import { LotNotesCard } from "./LotNotesCard";
+import { LotAlertsCard } from "@/features/alerts/components/LotAlertsCard";
+import { ChevronRight, Plus, Shield } from "lucide-react";
 import { useSession } from "next-auth/react";
 
-type StockResponse = { stockLot: StockLot };
+type StockResponse = {
+  stockLot: StockLot;
+  effectiveBasis?: {
+    cspPremiumDuringHold: number;
+    cspPendingPremium: number;
+    effectiveAvgCost: number;
+  };
+};
 
 type CoveredCallRow = {
   id: string;
@@ -327,6 +337,7 @@ export default function StockDetailPageClient(props: {
 
   const [closeOpen, setCloseOpen] = React.useState<boolean>(false);
   const [adminEditOpen, setAdminEditOpen] = React.useState(false);
+  const [addSharesOpen, setAddSharesOpen] = React.useState(false);
 
   const { data, error, isLoading, mutate } = useSWR<StockResponse>(
     `/api/stocks/${stockId}`,
@@ -362,6 +373,10 @@ export default function StockDetailPageClient(props: {
 
   const shares = safeNumber(stockLot?.shares ?? 0);
   const avg = toNumber(stockLot?.avgCost ?? 0);
+  const cspPremiumDuringHold = data?.effectiveBasis?.cspPremiumDuringHold ?? 0;
+  const cspPendingPremium = data?.effectiveBasis?.cspPendingPremium ?? 0;
+  const effectiveAvgCost = data?.effectiveBasis?.effectiveAvgCost ?? avg;
+  const hasCspBoost = cspPremiumDuringHold > 0 && shares > 0;
 
   const { data: quoteData } = useSWR<Record<string, QuoteResult>>(
     stockLot?.ticker ? `/api/quotes?tickers=${stockLot.ticker}` : null,
@@ -428,12 +443,22 @@ export default function StockDetailPageClient(props: {
   const s = stockLot;
   const basis = avg * shares;
   const sharesForContracts = Math.floor(shares / 100);
+  const availableContracts = Math.max(
+    0,
+    sharesForContracts - Math.floor(openCcShares / 100),
+  );
 
   const { totalCaptured, pendingPremium, closedCount } = ccMetrics;
   const originalAvg =
     totalCaptured > 0 ? avg + totalCaptured / shares : null;
+  // Combined "if all open premiums get captured" projection: sums pending CC
+  // premium (open CCs against this lot) and pending CSP premium (open CSPs on
+  // the same ticker/portfolio). One forward-looking sell-floor instead of two.
+  const totalPendingPremium = pendingPremium + cspPendingPremium;
   const adjAvgIfAllCapture =
-    pendingPremium > 0 ? avg - pendingPremium / shares : null;
+    totalPendingPremium > 0 && shares > 0
+      ? Math.max(0, effectiveAvgCost - totalPendingPremium / shares)
+      : null;
 
   const isClosed = String(s.status).toUpperCase() === "CLOSED";
   const realizedPnl = safeNumber(s.realizedPnl);
@@ -464,7 +489,18 @@ export default function StockDetailPageClient(props: {
               Edit
             </Button>
           )}
-          {!isClosed && sharesForContracts >= 1 ? (
+          {!isClosed ? (
+            <Button
+              variant="outline"
+              size="sm"
+              className="gap-1.5"
+              onClick={() => setAddSharesOpen(true)}
+            >
+              <Plus className="h-3.5 w-3.5" />
+              Add Shares
+            </Button>
+          ) : null}
+          {!isClosed && availableContracts >= 1 ? (
             <AddTradeModal
               portfolioId={portfolioId}
               trigger={<Button variant="outline" size="sm">Sell Covered Call</Button>}
@@ -474,8 +510,8 @@ export default function StockDetailPageClient(props: {
                 stockLotId: s.id,
               }}
               lockPrefill
-              defaultContracts={sharesForContracts}
-              maxContracts={sharesForContracts}
+              defaultContracts={availableContracts}
+              maxContracts={availableContracts}
             />
           ) : null}
           {!isClosed ? (
@@ -541,87 +577,127 @@ export default function StockDetailPageClient(props: {
         ) : null}
       </div>
 
-      {/* CC Cost-Basis Summary */}
-      {coveredCalls.length > 0 || s.notes ? (
+      {/* Cost Basis via Premiums — Original Avg (tax basis) → Effective Basis
+          (mental sell-floor) with CC + CSP premium breakdown showing the
+          reduction. CC reductions are already baked into avgCost; CSP premiums
+          collected during the hold are display-only and never mutate avgCost. */}
+      {coveredCalls.length > 0 || hasCspBoost || cspPendingPremium > 0 ? (
         <Card className="p-5">
           <div className="flex items-center justify-between mb-4">
             <div>
               <h2 className="text-sm font-semibold text-muted-foreground uppercase tracking-wide">
-                Cost Basis via Covered Calls
+                Cost Basis via Premiums
               </h2>
               <div className="text-xs text-muted-foreground mt-0.5">
                 Opened {new Date(s.openedAt).toLocaleDateString()}
               </div>
             </div>
-            {closedCount > 0 ? (
-              <span className="text-xs text-muted-foreground">
-                {closedCount} CC{closedCount !== 1 ? "s" : ""} closed
-              </span>
-            ) : null}
+            <div className="flex items-center gap-3 text-xs text-muted-foreground">
+              {closedCount > 0 ? (
+                <span>{closedCount} CC{closedCount !== 1 ? "s" : ""} closed</span>
+              ) : null}
+              {hasCspBoost ? (
+                <span>{money(cspPremiumDuringHold)} CSP captured</span>
+              ) : null}
+            </div>
           </div>
 
-          {totalCaptured === 0 && adjAvgIfAllCapture === null ? (
+          {totalCaptured === 0 && adjAvgIfAllCapture === null && !hasCspBoost ? (
             <p className="text-sm text-muted-foreground">
-              Close covered calls to see cost basis reduction here.
+              Close covered calls or sell CSPs on this ticker to see cost basis reduction here.
             </p>
           ) : (
-            <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
-              {originalAvg !== null ? (
-                <div>
-                  <div className="text-xs text-muted-foreground mb-1">Original Avg</div>
-                  <div className="text-xl font-bold tabular-nums text-muted-foreground">
-                    {moneyCompact(originalAvg)}
+            (() => {
+              // displayedOriginal = what you paid (tax basis). When CCs have
+              // already reduced avgCost, originalAvg recovers it; when no CCs
+              // have closed yet, avg itself is the original.
+              const displayedOriginal = originalAvg ?? avg;
+              const reductionPerShare = displayedOriginal - effectiveAvgCost;
+              const reductionPct =
+                displayedOriginal > 0
+                  ? (reductionPerShare / displayedOriginal) * 100
+                  : 0;
+              return (
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
+                  <div>
+                    <div className="text-xs text-muted-foreground mb-1">Original Avg</div>
+                    <div className="text-xl font-bold tabular-nums text-muted-foreground">
+                      {moneyCompact(displayedOriginal)}
+                    </div>
+                    <div className="text-xs text-muted-foreground mt-0.5">
+                      tax basis · what you paid
+                    </div>
                   </div>
-                  <div className="text-xs text-muted-foreground mt-0.5">before premiums</div>
-                </div>
-              ) : null}
 
-              <div>
-                <div className="text-xs text-muted-foreground mb-1">Current Avg</div>
-                <div className="text-xl font-bold tabular-nums text-emerald-600 dark:text-emerald-400">
-                  {moneyCompact(avg)}
-                </div>
-                {originalAvg !== null ? (
-                  <div className="text-xs text-muted-foreground mt-0.5">
-                    {((1 - avg / originalAvg) * 100).toFixed(1)}% lower
+                  <div>
+                    <div className="text-xs text-muted-foreground mb-1">Effective Basis</div>
+                    <div className="text-xl font-bold tabular-nums text-emerald-600 dark:text-emerald-400">
+                      {moneyCompact(effectiveAvgCost)}
+                    </div>
+                    {reductionPerShare > 0 ? (
+                      <div className="text-xs text-muted-foreground mt-0.5">
+                        {reductionPct.toFixed(1)}% lower · sell-floor
+                      </div>
+                    ) : (
+                      <div className="text-xs text-muted-foreground mt-0.5">sell-floor</div>
+                    )}
                   </div>
-                ) : null}
-              </div>
 
-              {totalCaptured > 0 ? (
-                <div>
-                  <div className="text-xs text-muted-foreground mb-1">Total Captured</div>
-                  <div className="text-xl font-bold tabular-nums text-emerald-600 dark:text-emerald-400">
-                    {money(totalCaptured)}
-                  </div>
-                  <div className="text-xs text-muted-foreground mt-0.5">
-                    -{moneyCompact(totalCaptured / shares)}/share
-                  </div>
-                </div>
-              ) : null}
+                  {totalCaptured > 0 ? (
+                    <div>
+                      <div className="text-xs text-muted-foreground mb-1">CC Premiums</div>
+                      <div className="text-xl font-bold tabular-nums text-emerald-600 dark:text-emerald-400">
+                        {money(totalCaptured)}
+                      </div>
+                      <div className="text-xs text-muted-foreground mt-0.5">
+                        -{moneyCompact(totalCaptured / shares)}/share
+                      </div>
+                    </div>
+                  ) : null}
 
-              {adjAvgIfAllCapture !== null ? (
-                <div>
-                  <div className="text-xs text-muted-foreground mb-1">If Open CCs Expire</div>
-                  <div className="text-xl font-bold tabular-nums text-emerald-600 dark:text-emerald-400">
-                    {moneyCompact(adjAvgIfAllCapture)}
-                  </div>
-                  <div className="text-xs text-muted-foreground mt-0.5">
-                    {money(pendingPremium)} pending
-                  </div>
+                  {hasCspBoost ? (
+                    <div>
+                      <div className="text-xs text-muted-foreground mb-1">CSP Premiums</div>
+                      <div className="text-xl font-bold tabular-nums text-emerald-600 dark:text-emerald-400">
+                        {money(cspPremiumDuringHold)}
+                      </div>
+                      <div className="text-xs text-muted-foreground mt-0.5">
+                        -{moneyCompact(cspPremiumDuringHold / shares)}/share during hold
+                      </div>
+                    </div>
+                  ) : null}
+
+                  {adjAvgIfAllCapture !== null ? (
+                    <div>
+                      <div className="text-xs text-muted-foreground mb-1">
+                        If All Open Expire
+                      </div>
+                      <div className="text-xl font-bold tabular-nums text-emerald-600 dark:text-emerald-400">
+                        {moneyCompact(adjAvgIfAllCapture)}
+                      </div>
+                      <div className="text-xs text-muted-foreground mt-0.5">
+                        {money(totalPendingPremium)} pending
+                        {pendingPremium > 0 && cspPendingPremium > 0
+                          ? ` (${money(pendingPremium)} CC + ${money(cspPendingPremium)} CSP)`
+                          : pendingPremium > 0
+                            ? " (CC)"
+                            : " (CSP)"}
+                      </div>
+                    </div>
+                  ) : null}
                 </div>
-              ) : null}
-            </div>
+              );
+            })()
           )}
 
-          {s.notes ? (
-            <div className={coveredCalls.length > 0 ? "mt-4 pt-4 border-t border-border/60" : ""}>
-              <div className="text-xs text-muted-foreground mb-1">Notes</div>
-              <p className="text-sm">{s.notes}</p>
-            </div>
-          ) : null}
         </Card>
       ) : null}
+
+      {!isClosed ? (
+        <LotAlertsCard stockLotId={stockId} ticker={s.ticker} avgCost={avg} />
+      ) : null}
+
+      <LotNotesCard stockId={stockId} notes={s.notes ?? null} canEdit={!isClosed} />
 
       <Card className="p-4">
         <h2 className="text-lg font-semibold">Covered Calls</h2>
@@ -707,16 +783,27 @@ export default function StockDetailPageClient(props: {
       </Card>
 
       {String(s.status).toUpperCase() === "OPEN" ? (
-        <CloseStockLotModal
-          open={closeOpen}
-          onOpenChange={setCloseOpen}
-          stockId={stockId}
-          portfolioId={portfolioId}
-          ticker={s.ticker}
-          shares={shares}
-          avgCost={toNumber(s.avgCost)}
-          openCcShares={openCcShares}
-        />
+        <>
+          <CloseStockLotModal
+            open={closeOpen}
+            onOpenChange={setCloseOpen}
+            stockId={stockId}
+            portfolioId={portfolioId}
+            ticker={s.ticker}
+            shares={shares}
+            avgCost={toNumber(s.avgCost)}
+            openCcShares={openCcShares}
+          />
+          <AddSharesModal
+            open={addSharesOpen}
+            onOpenChange={setAddSharesOpen}
+            stockId={stockId}
+            portfolioId={portfolioId}
+            ticker={s.ticker}
+            shares={shares}
+            avgCost={toNumber(s.avgCost)}
+          />
+        </>
       ) : null}
 
       {isAdmin && stockLot && (

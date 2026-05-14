@@ -11,11 +11,15 @@ const {
   mockStockLotFindFirst,
   mockStockLotFindUnique,
   mockStockLotUpdate,
+  mockTradeAggregate,
+  mockTradeFindMany,
 } = vi.hoisted(() => ({
   mockGetServerSession: vi.fn(),
   mockStockLotFindFirst: vi.fn(),
   mockStockLotFindUnique: vi.fn(),
   mockStockLotUpdate: vi.fn(),
+  mockTradeAggregate: vi.fn(),
+  mockTradeFindMany: vi.fn(),
 }));
 
 vi.mock("next-auth", () => ({ getServerSession: mockGetServerSession }));
@@ -32,6 +36,10 @@ vi.mock("@/server/prisma", () => ({
       findFirst: mockStockLotFindFirst,
       findUnique: mockStockLotFindUnique,
       update: mockStockLotUpdate,
+    },
+    trade: {
+      aggregate: mockTradeAggregate,
+      findMany: mockTradeFindMany,
     },
   },
 }));
@@ -67,6 +75,8 @@ beforeEach(() => {
   mockGetServerSession.mockResolvedValue(mockSession());
   mockStockLotUpdate.mockResolvedValue({ id: "lot-1", trades: [] });
   mockStockLotFindUnique.mockResolvedValue({ id: "lot-1", trades: [] });
+  mockTradeAggregate.mockResolvedValue({ _sum: { premiumCaptured: 0 } });
+  mockTradeFindMany.mockResolvedValue([]);
 });
 
 // ---------------------------------------------------------------------------
