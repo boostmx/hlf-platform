@@ -70,6 +70,42 @@ export async function fetchWheelPortfolios(userId: string): Promise<WheelPortfol
   return body.data;
 }
 
+export type WheelTradingSummaryTotals = {
+  tradePnl: number;
+  stockPnl: number;
+  totalPnl: number;
+  tradeCount: number;
+  winCount: number;
+  winRate: number;
+};
+
+export async function fetchWheelTradingSummary(params: {
+  userId: string;
+  from?: string;
+  to?: string;
+  portfolioIds?: string[];
+}): Promise<WheelTradingSummaryTotals> {
+  const url = new URL(`${baseUrl()}/api/internal/v1/trading-summary`);
+  url.searchParams.set("userId", params.userId);
+  if (params.from) url.searchParams.set("from", params.from);
+  if (params.to) url.searchParams.set("to", params.to);
+  if (params.portfolioIds?.length) {
+    url.searchParams.set("portfolioIds", params.portfolioIds.join(","));
+  }
+
+  const res = await fetch(url.toString(), {
+    headers: headers(),
+    cache: "no-store",
+  });
+
+  if (!res.ok) {
+    throw new Error(`Wheel Tracker trading-summary failed: ${res.status}`);
+  }
+
+  const body = (await res.json()) as { data: WheelTradingSummaryTotals };
+  return body.data;
+}
+
 export async function fetchWheelClosedTrades(params: {
   userId: string;
   from?: string;

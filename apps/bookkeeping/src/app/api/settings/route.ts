@@ -1,17 +1,21 @@
 import { NextRequest, NextResponse } from "next/server";
-import prisma from "@/server/prisma";
+import { authPrisma } from "@hlf/auth-db";
 import { requireAdmin } from "@/server/auth/requireAdmin";
 
+// tradingPortfolios now lives on @hlf/auth-db's User table as a shared per-user
+// setting. The portal owns the canonical UI for it; bookkeeping's own Settings
+// page reads/writes the same column so toggles stay in sync.
 export async function GET() {
   const auth = await requireAdmin();
   if (!auth.ok) return auth.response;
 
-  const settings = await prisma.bookkeepingSettings.findUnique({
-    where: { userId: auth.userId },
+  const user = await authPrisma.user.findUnique({
+    where: { id: auth.userId },
+    select: { tradingPortfolios: true },
   });
 
   return NextResponse.json({
-    tradingPortfolios: settings?.tradingPortfolios ?? "all",
+    tradingPortfolios: user?.tradingPortfolios ?? "all",
   });
 }
 
@@ -19,13 +23,13 @@ export async function PUT(req: NextRequest) {
   const auth = await requireAdmin();
   if (!auth.ok) return auth.response;
 
-  const { tradingPortfolios } = await req.json() as { tradingPortfolios: string };
+  const { tradingPortfolios } = (await req.json()) as { tradingPortfolios?: string };
 
-  const settings = await prisma.bookkeepingSettings.upsert({
-    where: { userId: auth.userId },
-    create: { userId: auth.userId, tradingPortfolios: tradingPortfolios ?? "all" },
-    update: { tradingPortfolios: tradingPortfolios ?? "all" },
+  const updated = await authPrisma.user.update({
+    where: { id: auth.userId },
+    data: { tradingPortfolios: tradingPortfolios ?? "all" },
+    select: { tradingPortfolios: true },
   });
 
-  return NextResponse.json({ tradingPortfolios: settings.tradingPortfolios });
+  return NextResponse.json({ tradingPortfolios: updated.tradingPortfolios });
 }

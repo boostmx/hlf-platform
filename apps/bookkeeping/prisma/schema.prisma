@@ -53,9 +53,12 @@ model BookkeepingMonthNote {
   @@index([userId])
 }
 
+// `tradingPortfolios` lived here until 2026-05-16 — moved to
+// @hlf/auth-db's `User.tradingPortfolios` as a shared per-user setting
+// (one source of truth across portal + bookkeeping). This row is kept
+// for future per-app bookkeeping preferences; today it only stores
+// `userId` and `updatedAt`.
 model BookkeepingSettings {
-  userId            String   @id
-  // "all" or comma-separated portfolio IDs from wheel-strat-tracker
-  tradingPortfolios String   @default("all")
-  updatedAt         DateTime @updatedAt
+  userId    String   @id
+  updatedAt DateTime @updatedAt
 }

@@ -13,6 +13,7 @@ async function fetchSummary<T>(
   baseUrlEnv: string,
   appName: string,
   email: string,
+  extraParams?: Record<string, string>,
 ): Promise<{ data: T | null; error?: string }> {
   const base = process.env[baseUrlEnv];
   if (!base) return { data: null, error: `${baseUrlEnv} not configured` };
@@ -22,6 +23,9 @@ async function fetchSummary<T>(
 
   const url = new URL(`${base}/api/internal/v1/portal-summary`);
   url.searchParams.set("email", email);
+  for (const [k, v] of Object.entries(extraParams ?? {})) {
+    url.searchParams.set(k, v);
+  }
 
   try {
     const res = await fetch(url.toString(), {
@@ -41,8 +45,12 @@ async function fetchSummary<T>(
   }
 }
 
-export function fetchWheelSummary(email: string) {
-  return fetchSummary<WheelSummary>("WHEEL_TRACKER_URL", "wheel-tracker", email);
+export function fetchWheelSummary(email: string, portfolioIds?: string[]) {
+  const extra =
+    portfolioIds && portfolioIds.length > 0
+      ? { portfolioIds: portfolioIds.join(",") }
+      : undefined;
+  return fetchSummary<WheelSummary>("WHEEL_TRACKER_URL", "wheel-tracker", email, extra);
 }
 
 export function fetchBookkeepingSummary(email: string) {

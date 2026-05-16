@@ -9,7 +9,11 @@ import { authPrisma } from "@hlf/auth-db";
 // GET /api/internal/v1/portal-summary?email=  (or ?userId=)
 // Shaped for the HLF Portal dashboard — small response, single round-trip.
 // Returns: open trade/lot counts, MTD/YTD realized P&L (trades + stock lots),
-// and alerts data (now sourced from the alerts module merged in 2026-05-13).
+// alerts data (sourced from the alerts module merged in 2026-05-13), and
+// open trades with DTE <= 7 (consumed by portal's Today inbox).
+
+const EXPIRING_DTE_THRESHOLD = 7;
+const EXPIRING_LIMIT = 20;
 export async function GET(request: Request) {
   if (!validateInternalApiKey(request)) {
     return internalError("Unauthorized", 401);
@@ -18,6 +22,13 @@ export async function GET(request: Request) {
   const { searchParams } = new URL(request.url);
   const userId = searchParams.get("userId");
   const email = searchParams.get("email");
+  // Optional CSV of portfolio IDs to scope realized P&L + expiring trades to.
+  // Open-position counts and alerts are NOT scoped — those reflect the full
+  // account regardless of which portfolios the user wants in their rollups.
+  const portfolioIdsParam = searchParams.get("portfolioIds");
+  const portfolioIds = portfolioIdsParam
+    ? portfolioIdsParam.split(",").filter(Boolean)
+    : undefined;
 
   if (!userId && !email) {
     return internalError("userId or email is required", 400);
@@ -38,6 +49,7 @@ export async function GET(request: Request) {
         alertsToday: 0,
         alertsThisWeek: 0,
         recentAlerts: [],
+        expiringTrades: [],
       });
     }
     resolvedUserId = user.id;
@@ -49,8 +61,16 @@ export async function GET(request: Request) {
   const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate());
   const weekStart = new Date(todayStart);
   weekStart.setDate(weekStart.getDate() - 7);
+  const expiringCutoff = new Date(todayStart);
+  expiringCutoff.setDate(expiringCutoff.getDate() + EXPIRING_DTE_THRESHOLD + 1);
 
-  const portfolioFilter = { userId: resolvedUserId! };
+  const portfolioFilter = {
+    userId: resolvedUserId!,
+    ...(portfolioIds && { id: { in: portfolioIds } }),
+  };
+  // Open positions count + expiring trades reflect the full account so the
+  // user still sees what they actually have. Realized P&L respects the filter.
+  const portfolioFilterAll = { userId: resolvedUserId! };
 
   try {
     const [
@@ -61,12 +81,13 @@ export async function GET(request: Request) {
       alertsToday,
       alertsThisWeek,
       recentAlerts,
+      expiringTradeRows,
     ] = await Promise.all([
       db.trade.count({
-        where: { status: "open", portfolio: portfolioFilter },
+        where: { status: "open", portfolio: portfolioFilterAll },
       }),
       db.stockLot.count({
-        where: { status: "OPEN", portfolio: portfolioFilter },
+        where: { status: "OPEN", portfolio: portfolioFilterAll },
       }),
       db.trade.findMany({
         where: {
@@ -103,6 +124,24 @@ export async function GET(request: Request) {
           },
         },
       }),
+      db.trade.findMany({
+        where: {
+          status: "open",
+          portfolio: portfolioFilterAll,
+          expirationDate: { lt: expiringCutoff },
+        },
+        orderBy: { expirationDate: "asc" },
+        take: EXPIRING_LIMIT,
+        select: {
+          id: true,
+          ticker: true,
+          type: true,
+          strikePrice: true,
+          contracts: true,
+          expirationDate: true,
+          portfolioId: true,
+        },
+      }),
     ]);
 
     let mtdRealizedPnl = 0;
@@ -120,6 +159,21 @@ export async function GET(request: Request) {
       if (lot.closedAt && lot.closedAt >= mtdStart) mtdRealizedPnl += pnl;
     }
 
+    const expiringTrades = expiringTradeRows.map((t) => {
+      const dteMs = t.expirationDate.getTime() - todayStart.getTime();
+      const dte = Math.max(0, Math.ceil(dteMs / 86_400_000));
+      return {
+        id: t.id,
+        ticker: t.ticker,
+        type: t.type,
+        strikePrice: t.strikePrice,
+        contracts: t.contracts,
+        expirationDate: t.expirationDate.toISOString(),
+        portfolioId: t.portfolioId,
+        dte,
+      };
+    });
+
     return internalResponse({
       openTradeCount,
       openLotCount,
@@ -135,6 +189,7 @@ export async function GET(request: Request) {
         tradeId: a.config.tradeId,
         watchlistTicker: a.config.watchlistTicker,
       })),
+      expiringTrades,
     });
   } catch (error) {
     console.error("[internal/portal-summary] error:", error);

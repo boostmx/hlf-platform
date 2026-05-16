@@ -14,6 +14,17 @@ export type RecentAlert = {
   watchlistTicker: string | null;
 };
 
+export type ExpiringTrade = {
+  id: string;
+  ticker: string;
+  type: string;
+  strikePrice: number;
+  contracts: number;
+  expirationDate: string;
+  portfolioId: string;
+  dte: number;
+};
+
 export type WheelSummary = {
   openTradeCount: number;
   openLotCount: number;
@@ -22,6 +33,9 @@ export type WheelSummary = {
   alertsToday: number;
   alertsThisWeek: number;
   recentAlerts: RecentAlert[];
+  // Optional: returned by wheel-tracker only after the Today-inbox extension
+  // ships. Older deployments omit it.
+  expiringTrades?: ExpiringTrade[];
 };
 
 export type BookkeepingSummary = {
@@ -29,6 +43,19 @@ export type BookkeepingSummary = {
   mtdIncome: number;
   mtdExpenses: number;
   ytdNet: number;
+  // Optional: returned by bookkeeping only after the trading-rollup extension
+  // ships. `mtdIncome` already includes this number; broken out so the portal
+  // can show the "of which trading: $X" sub-line.
+  mtdTradingPnl?: number;
+  ytdTradingPnl?: number;
+};
+
+export type OverBudgetCategory = {
+  id: string;
+  name: string;
+  spent: number;
+  budget: number;
+  pct: number;
 };
 
 export type BudgetSummary = {
@@ -36,6 +63,9 @@ export type BudgetSummary = {
   monthlyBudgetTotal: number;
   remaining: number;
   fireScorePct: number | null;
+  // Optional: returned by budget-tracker only after the Today-inbox extension
+  // ships. Older deployments omit it.
+  overBudgetCategories?: OverBudgetCategory[];
 };
 
 export type PortalSummary = {

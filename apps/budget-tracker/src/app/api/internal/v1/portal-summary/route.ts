@@ -10,7 +10,11 @@ import { computeFiNumber, computeFireScore } from "@/lib/fireCalc";
 // GET /api/internal/v1/portal-summary?email=  (or ?userId=)
 // MTD spend (one-time + recurring), total monthly budget (MonthlyBudget
 // overrides + Category.monthlyBudget defaults), and FIRE % from FIREProfile +
-// current investable assets.
+// current investable assets. Also returns the over-budget category list
+// (>= 80% spent), consumed by portal's Today inbox.
+
+const OVER_BUDGET_THRESHOLD = 0.8;
+const OVER_BUDGET_LIMIT = 10;
 export async function GET(request: Request) {
   if (!validateInternalApiKey(request)) {
     return internalError("Unauthorized", 401);
@@ -36,6 +40,7 @@ export async function GET(request: Request) {
         monthlyBudgetTotal: 0,
         remaining: 0,
         fireScorePct: null,
+        overBudgetCategories: [],
       });
     }
     resolvedUserId = user.id;
@@ -70,7 +75,7 @@ export async function GET(request: Request) {
       }),
       prisma.category.findMany({
         where: { userId: resolvedUserId! },
-        select: { id: true, monthlyBudget: true, isSavings: true, type: true },
+        select: { id: true, name: true, monthlyBudget: true, isSavings: true, type: true },
       }),
       prisma.monthlyBudget.findMany({
         where: { userId: resolvedUserId!, year, month },
@@ -86,29 +91,54 @@ export async function GET(request: Request) {
     ]);
 
     const categoryMap = new Map(categories.map((c) => [c.id, c]));
+    const spentByCategory = new Map<string, number>();
 
     let mtdSpent = 0;
     for (const t of transactions) {
       const cat = t.categoryId ? categoryMap.get(t.categoryId) : null;
       if (cat?.isSavings) continue;
-      mtdSpent += Number(t.amount);
+      const amt = Number(t.amount);
+      mtdSpent += amt;
+      if (t.categoryId) {
+        spentByCategory.set(t.categoryId, (spentByCategory.get(t.categoryId) ?? 0) + amt);
+      }
     }
     for (const r of recurring) {
       const cat = r.categoryId ? categoryMap.get(r.categoryId) : null;
       if (cat?.isSavings) continue;
-      mtdSpent += Number(r.amount);
+      const amt = Number(r.amount);
+      mtdSpent += amt;
+      if (r.categoryId) {
+        spentByCategory.set(r.categoryId, (spentByCategory.get(r.categoryId) ?? 0) + amt);
+      }
     }
 
     const overrideMap = new Map(
       monthlyBudgets.map((b) => [b.categoryId, Number(b.budgetAmount)]),
     );
     let monthlyBudgetTotal = 0;
+    const overBudgetCategories: {
+      id: string;
+      name: string;
+      spent: number;
+      budget: number;
+      pct: number;
+    }[] = [];
     for (const cat of categories) {
       if (cat.type !== "expense" || cat.isSavings) continue;
       const override = overrideMap.get(cat.id);
       const defaultBudget = cat.monthlyBudget != null ? Number(cat.monthlyBudget) : 0;
-      monthlyBudgetTotal += override ?? defaultBudget;
+      const budget = override ?? defaultBudget;
+      monthlyBudgetTotal += budget;
+      if (budget <= 0) continue;
+      const spent = spentByCategory.get(cat.id) ?? 0;
+      const pct = spent / budget;
+      if (pct >= OVER_BUDGET_THRESHOLD) {
+        overBudgetCategories.push({ id: cat.id, name: cat.name, spent, budget, pct });
+      }
     }
+    overBudgetCategories.sort((a, b) => b.pct - a.pct);
+    overBudgetCategories.splice(OVER_BUDGET_LIMIT);
 
     let fireScorePct: number | null = null;
     if (fireProfile) {
@@ -128,6 +158,7 @@ export async function GET(request: Request) {
       monthlyBudgetTotal,
       remaining: monthlyBudgetTotal - mtdSpent,
       fireScorePct,
+      overBudgetCategories,
     });
   } catch (error) {
     console.error("[internal/portal-summary] error:", error);
