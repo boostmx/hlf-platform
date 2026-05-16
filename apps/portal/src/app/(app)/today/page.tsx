@@ -7,11 +7,11 @@ import {
 import { APPS } from "@/lib/apps";
 import { buildTodayItems } from "@/lib/today-items";
 import { getUserTradingPortfolios } from "@/lib/user-settings";
-import { DashboardView } from "./dashboard-view";
+import { TodayView } from "./today-view";
 
 export const dynamic = "force-dynamic";
 
-export default async function DashboardPage() {
+export default async function TodayPage() {
   const session = await auth();
   const email = session?.user?.email ?? "";
   const userId = session?.user?.id ?? "";
@@ -28,7 +28,7 @@ export default async function DashboardPage() {
   const wheelUrl = APPS.find((a) => a.key === "wheel")?.url ?? "";
   const budgetUrl = APPS.find((a) => a.key === "budget")?.url ?? "";
 
-  const todayItems = buildTodayItems({
+  const items = buildTodayItems({
     wheel: wheel.data,
     bookkeeping: bookkeeping.data,
     budget: budget.data,
@@ -36,12 +36,9 @@ export default async function DashboardPage() {
   });
 
   return (
-    <DashboardView
+    <TodayView
       firstName={firstName}
-      wheel={wheel.data}
-      bookkeeping={bookkeeping.data}
-      budget={budget.data}
-      todayItems={todayItems}
+      items={items}
       errors={{
         wheel: wheel.error,
         bookkeeping: bookkeeping.error,

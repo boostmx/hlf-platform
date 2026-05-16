@@ -22,7 +22,7 @@ A purpose-built dashboard for traders running the Wheel Strategy. Most brokerage
 ---
 
 ### Bookkeeping
-`apps/bookkeeping` · [bookkeeping.hlfinancialstrategies.com](https://bookkeeping.hlfinancialstrategies.com)
+`apps/bookkeeping` · [books.hlfinancialstrategies.com](https://books.hlfinancialstrategies.com)
 
 Personal income and expense tracking with trading P&L automatically pulled in from the Wheel Tracker.
 

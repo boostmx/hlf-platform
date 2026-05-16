@@ -25,6 +25,12 @@ model User {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
+  // Shared filter for "which wheel-tracker portfolios count for cross-app
+  // trading P&L rollups". "all" or a CSV of portfolio IDs. Read by the portal
+  // and by bookkeeping; wheel-tracker itself ignores this and continues to
+  // show all portfolios in its own UI.
+  tradingPortfolios String @default("all")
+
   accounts Account[]
   sessions Session[]
 }

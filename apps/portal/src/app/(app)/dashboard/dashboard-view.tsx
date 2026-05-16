@@ -1,36 +1,33 @@
 import Link from "next/link";
 import {
   ArrowRight,
+  ArrowUpRight,
   TrendingUp,
-  Wallet,
-  Target,
   Briefcase,
+  Home,
   Banknote,
-  PiggyBank,
   Inbox,
-  AlertCircle,
+  Sparkles,
+  Bell,
+  CalendarClock,
+  PiggyBank,
 } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@hlf/ui/card";
 import { Badge } from "@hlf/ui/badge";
-import { APPS, getAppUrl } from "@/lib/apps";
-import { formatCurrency, formatPercent } from "@/lib/utils";
+import { cn, formatCurrency } from "@/lib/utils";
 import type {
   BookkeepingSummary,
   BudgetSummary,
   WheelSummary,
 } from "@/lib/clients/types";
-
-const APP_ICON = {
-  wheel: TrendingUp,
-  bookkeeping: Wallet,
-  budget: Target,
-} as const;
+import type { TodayItem, TodayItemKind, TodaySeverity } from "@/lib/today-items";
 
 type Props = {
   firstName: string;
   wheel: WheelSummary | null;
   bookkeeping: BookkeepingSummary | null;
   budget: BudgetSummary | null;
+  todayItems: TodayItem[];
   errors: {
     wheel?: string;
     bookkeeping?: string;
@@ -38,11 +35,40 @@ type Props = {
   };
 };
 
-export function DashboardView({ firstName, wheel, bookkeeping, budget, errors }: Props) {
+const TODAY_PREVIEW_LIMIT = 6;
+
+const KIND_ICON: Record<TodayItemKind, React.ElementType> = {
+  ALERT: Bell,
+  EXPIRING: CalendarClock,
+  OVER_BUDGET: PiggyBank,
+};
+
+const SEVERITY_DOT: Record<TodaySeverity, string> = {
+  high: "bg-rose-500",
+  medium: "bg-amber-500",
+  low: "bg-muted-foreground/40",
+};
+
+export function DashboardView({
+  firstName,
+  wheel,
+  bookkeeping,
+  budget,
+  todayItems,
+  errors,
+}: Props) {
   const greeting = firstName ? `Welcome back, ${firstName}` : "Welcome back";
 
+  // True net = trading P&L (wheel) − business expenses (bookkeeping)
+  //          − personal spend (budget). All MTD. Computed only when every
+  //          source is present so partial outages don't lie.
+  const trueNet =
+    wheel && bookkeeping && budget
+      ? wheel.mtdRealizedPnl - bookkeeping.mtdExpenses - budget.mtdSpent
+      : null;
+
   return (
-    <div className="max-w-7xl mx-auto px-4 md:px-8 py-6 md:py-10 space-y-8">
+    <div className="max-w-6xl mx-auto px-4 md:px-8 py-6 md:py-10 space-y-6">
       <header>
         <h1 className="text-2xl md:text-3xl font-bold tracking-tight">{greeting}</h1>
         <p className="text-muted-foreground text-sm mt-1">
@@ -52,154 +78,119 @@ export function DashboardView({ firstName, wheel, bookkeeping, budget, errors }:
 
       <section className="grid grid-cols-2 lg:grid-cols-4 gap-3 md:gap-4">
         <KpiCard
-          icon={Briefcase}
-          label="Open Positions"
-          value={wheel ? String(wheel.openTradeCount + wheel.openLotCount) : "—"}
-          sub={
-            wheel
-              ? `${wheel.openTradeCount} trades · ${wheel.openLotCount} lots`
-              : errors.wheel ?? "Loading…"
-          }
-        />
-        <KpiCard
           icon={TrendingUp}
           label="MTD Trading P&L"
           value={wheel ? formatCurrency(wheel.mtdRealizedPnl) : "—"}
-          sub={wheel ? `YTD ${formatCurrency(wheel.ytdRealizedPnl, { compact: true })}` : errors.wheel ?? "Loading…"}
+          sub={
+            wheel
+              ? `YTD ${formatCurrency(wheel.ytdRealizedPnl, { compact: true })}`
+              : errors.wheel ?? "Loading…"
+          }
           tone={wheel ? (wheel.mtdRealizedPnl >= 0 ? "positive" : "negative") : "neutral"}
+        />
+        <KpiCard
+          icon={Briefcase}
+          label="Business Expenses"
+          value={bookkeeping ? formatCurrency(bookkeeping.mtdExpenses) : "—"}
+          sub={
+            bookkeeping
+              ? "Bookkeeping · MTD"
+              : errors.bookkeeping ?? "Loading…"
+          }
+          tone={bookkeeping ? "expense" : "neutral"}
+        />
+        <KpiCard
+          icon={Home}
+          label="Personal Spend"
+          value={budget ? formatCurrency(budget.mtdSpent) : "—"}
+          sub={
+            budget
+              ? `Budget · MTD`
+              : errors.budget ?? "Loading…"
+          }
+          tone={budget ? "expense" : "neutral"}
         />
         <KpiCard
           icon={Banknote}
           label="MTD Net"
-          value={bookkeeping ? formatCurrency(bookkeeping.mtdNet) : "—"}
+          value={trueNet != null ? formatCurrency(trueNet) : "—"}
           sub={
-            bookkeeping
-              ? `Income ${formatCurrency(bookkeeping.mtdIncome, { compact: true })} · Exp ${formatCurrency(bookkeeping.mtdExpenses, { compact: true })}`
-              : errors.bookkeeping ?? "Loading…"
+            trueNet != null
+              ? "Trading − business − personal"
+              : "Needs all three apps online"
           }
-          tone={bookkeeping ? (bookkeeping.mtdNet >= 0 ? "positive" : "negative") : "neutral"}
-        />
-        <KpiCard
-          icon={PiggyBank}
-          label="Budget Remaining"
-          value={budget ? formatCurrency(budget.remaining) : "—"}
-          sub={
-            budget && budget.monthlyBudgetTotal > 0
-              ? `${formatCurrency(budget.mtdSpent, { compact: true })} of ${formatCurrency(budget.monthlyBudgetTotal, { compact: true })}${budget.fireScorePct != null ? ` · FIRE ${formatPercent(budget.fireScorePct)}` : ""}`
-              : errors.budget ?? "No budget set"
-          }
+          tone={trueNet != null ? (trueNet >= 0 ? "positive" : "negative") : "neutral"}
         />
       </section>
 
       <section>
-        <h2 className="text-sm font-semibold text-muted-foreground uppercase tracking-wider mb-3">
-          Apps
-        </h2>
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
-          {APPS.map((app) => {
-            const Icon = APP_ICON[app.key];
-            const href = getAppUrl(app);
-            const hasError = Boolean(errors[app.key]);
-            return (
-              <a
-                key={app.key}
-                href={href}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="group block"
-              >
-                <Card className="h-full transition-all hover:border-primary/60 hover:shadow-sm">
-                  <CardContent className="p-4 flex flex-col h-full gap-3">
-                    <div className="flex items-start justify-between">
-                      <div
-                        className="w-9 h-9 rounded-lg flex items-center justify-center shadow-sm"
-                        style={{ backgroundColor: app.accent }}
-                      >
-                        <Icon className="w-4 h-4 text-white" />
-                      </div>
-                      <ArrowRight className="w-4 h-4 text-muted-foreground opacity-0 group-hover:opacity-100 transition-opacity" />
-                    </div>
-                    <div className="flex-1">
-                      <p className="font-semibold text-sm">{app.name}</p>
-                      <p className="text-xs text-muted-foreground mt-0.5 leading-snug">
-                        {app.description}
-                      </p>
-                    </div>
-                    {hasError && (
-                      <Badge variant="outline" className="self-start text-[10px] font-normal">
-                        <AlertCircle className="w-3 h-3 mr-1" />
-                        offline
-                      </Badge>
-                    )}
-                  </CardContent>
-                </Card>
-              </a>
-            );
-          })}
-        </div>
-      </section>
-
-      <section className="grid grid-cols-1 lg:grid-cols-3 gap-4">
-        <Card className="lg:col-span-2">
+        <Card>
           <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-3">
             <CardTitle className="text-base flex items-center gap-2">
               <Inbox className="w-4 h-4 text-primary" />
-              Recent alerts
+              Today
             </CardTitle>
-            {wheel && (
-              <Badge variant="secondary" className="font-mono text-[10px]">
-                {wheel.alertsToday} today · {wheel.alertsThisWeek} this week
-              </Badge>
-            )}
+            <Link
+              href="/today"
+              className="text-[11px] font-medium text-muted-foreground hover:text-foreground transition-colors flex items-center gap-1"
+            >
+              View all
+              {todayItems.length > 0 && (
+                <Badge variant="secondary" className="font-mono text-[10px] ml-1">
+                  {todayItems.length}
+                </Badge>
+              )}
+              <ArrowRight className="w-3 h-3" />
+            </Link>
           </CardHeader>
           <CardContent>
-            {wheel == null && (
-              <p className="text-sm text-muted-foreground py-8 text-center">
-                {errors.wheel ?? "Loading alerts…"}
-              </p>
-            )}
-            {wheel && wheel.recentAlerts.length === 0 && (
-              <p className="text-sm text-muted-foreground py-8 text-center">
-                No recent alerts. Triggers fire from Wheel Tracker when your thresholds cross.
-              </p>
-            )}
-            {wheel && wheel.recentAlerts.length > 0 && (
+            {todayItems.length === 0 ? (
+              <div className="py-10 flex flex-col items-center text-center gap-2">
+                <div className="h-10 w-10 rounded-full bg-emerald-500/10 grid place-items-center">
+                  <Sparkles className="h-5 w-5 text-emerald-500" />
+                </div>
+                <p className="text-sm font-medium">You&apos;re all clear</p>
+                <p className="text-xs text-muted-foreground max-w-xs leading-snug">
+                  No alerts firing, no trades expiring within a week, no categories near limit.
+                </p>
+              </div>
+            ) : (
               <ul className="divide-y divide-border -mt-1">
-                {wheel.recentAlerts.map((a) => (
-                  <li key={a.id} className="py-2.5">
-                    <div className="flex items-center gap-2 mb-0.5">
-                      <Badge variant="outline" className="text-[10px] font-normal px-1.5 py-0">
-                        {formatAlertType(a.type)}
-                      </Badge>
-                      <span className="text-[11px] text-muted-foreground">
-                        {formatRelativeTime(a.firedAt)}
-                      </span>
-                    </div>
-                    <p className="text-sm leading-snug">{a.message}</p>
-                  </li>
-                ))}
+                {todayItems.slice(0, TODAY_PREVIEW_LIMIT).map((item) => {
+                  const Icon = KIND_ICON[item.kind];
+                  return (
+                    <li key={item.id}>
+                      <a
+                        href={item.actionUrl}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="group flex items-start gap-3 py-3 -mx-2 px-2 rounded-md hover:bg-muted/50 transition-colors"
+                      >
+                        <div className="relative shrink-0 mt-0.5">
+                          <div className="h-8 w-8 rounded-md bg-muted grid place-items-center">
+                            <Icon className="h-4 w-4 text-muted-foreground" />
+                          </div>
+                          <span
+                            className={cn(
+                              "absolute -top-0.5 -right-0.5 h-2 w-2 rounded-full ring-2 ring-card",
+                              SEVERITY_DOT[item.severity],
+                            )}
+                            aria-hidden
+                          />
+                        </div>
+                        <div className="flex-1 min-w-0">
+                          <p className="text-sm font-medium leading-snug">{item.title}</p>
+                          <p className="text-[11px] text-muted-foreground leading-snug mt-0.5 line-clamp-2">
+                            {item.description}
+                          </p>
+                        </div>
+                        <ArrowUpRight className="h-4 w-4 text-muted-foreground/50 group-hover:text-foreground shrink-0 mt-1.5 transition-colors" />
+                      </a>
+                    </li>
+                  );
+                })}
               </ul>
             )}
-          </CardContent>
-        </Card>
-
-        <Card>
-          <CardHeader className="pb-3">
-            <CardTitle className="text-base">Quick links</CardTitle>
-          </CardHeader>
-          <CardContent className="space-y-2">
-            {APPS.map((app) => (
-              <Link
-                key={app.key}
-                href={getAppUrl(app)}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="flex items-center justify-between p-2 rounded-md hover:bg-muted transition-colors group"
-              >
-                <span className="text-sm">{app.name}</span>
-                <ArrowRight className="w-3.5 h-3.5 text-muted-foreground group-hover:text-foreground transition-colors" />
-              </Link>
-            ))}
           </CardContent>
         </Card>
       </section>
@@ -218,14 +209,16 @@ function KpiCard({
   label: string;
   value: string;
   sub: string;
-  tone?: "neutral" | "positive" | "negative";
+  tone?: "neutral" | "positive" | "negative" | "expense";
 }) {
   const toneClass =
     tone === "positive"
       ? "text-emerald-600 dark:text-emerald-400"
       : tone === "negative"
         ? "text-rose-600 dark:text-rose-400"
-        : "text-foreground";
+        : tone === "expense"
+          ? "text-rose-800/80 dark:text-rose-300/80"
+          : "text-foreground";
   return (
     <Card>
       <CardContent className="p-4">
@@ -242,23 +235,3 @@ function KpiCard({
   );
 }
 
-function formatAlertType(type: string) {
-  return type
-    .replace(/_/g, " ")
-    .toLowerCase()
-    .replace(/\b\w/g, (c) => c.toUpperCase());
-}
-
-function formatRelativeTime(iso: string) {
-  const then = new Date(iso).getTime();
-  if (Number.isNaN(then)) return "";
-  const diffMs = Date.now() - then;
-  const minutes = Math.floor(diffMs / 60_000);
-  if (minutes < 1) return "just now";
-  if (minutes < 60) return `${minutes}m ago`;
-  const hours = Math.floor(minutes / 60);
-  if (hours < 24) return `${hours}h ago`;
-  const days = Math.floor(hours / 24);
-  if (days < 7) return `${days}d ago`;
-  return new Date(iso).toLocaleDateString();
-}

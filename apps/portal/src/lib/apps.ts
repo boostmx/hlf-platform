@@ -30,7 +30,7 @@ export const APPS: AppDef[] = [
     description: "Income, expenses, tax estimates",
     url:
       process.env.NEXT_PUBLIC_BOOKKEEPING_URL ||
-      "https://bookkeeping.hlfinancialstrategies.com",
+      "https://books.hlfinancialstrategies.com",
     accent: "oklch(0.46 0.22 265)",
   },
   {

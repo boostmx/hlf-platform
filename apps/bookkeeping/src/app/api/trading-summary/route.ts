@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import prisma from "@/server/prisma";
+import { authPrisma } from "@hlf/auth-db";
 import { requireAdmin } from "@/server/auth/requireAdmin";
 import { fetchWheelClosedTrades } from "@/lib/wheel-tracker-client";
 
@@ -15,13 +15,17 @@ export async function GET(req: NextRequest) {
   const from = searchParams.get("from") ?? undefined;
   const to = searchParams.get("to");
 
-  const settings = await prisma.bookkeepingSettings.findUnique({
-    where: { userId: auth.userId },
+  // tradingPortfolios is the shared per-user setting on @hlf/auth-db's User
+  // table. Legacy BookkeepingSettings.tradingPortfolios column is no longer
+  // read here.
+  const sharedUser = await authPrisma.user.findUnique({
+    where: { id: auth.userId },
+    select: { tradingPortfolios: true },
   });
 
   const selectedPortfolioIds =
-    settings?.tradingPortfolios && settings.tradingPortfolios !== "all"
-      ? settings.tradingPortfolios.split(",").filter(Boolean)
+    sharedUser?.tradingPortfolios && sharedUser.tradingPortfolios !== "all"
+      ? sharedUser.tradingPortfolios.split(",").filter(Boolean)
       : undefined;
 
   // Extend 'to' to end of day — wheel tracker pre-dates trades to expiry date
